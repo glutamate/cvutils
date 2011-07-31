@@ -14,20 +14,25 @@ int main(int argc,char *argv[])
 
   int c;
   IplImage* color_img;
-  CvCapture* cv_cap = cvCaptureFromCAM(0);
+
+  CvCapture* cv_cap = cvCaptureFromCAM(getopt('c', 0));
 
   cvNamedWindow("Video",0); // create window
   color_img = cvQueryFrame(cv_cap); // get frame
-  int frameH    = (int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT);
-  int frameW    = (int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH);
-  int fps       = (int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FPS);
+  int frameH    = getopt('h',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT));
+  int frameW    = getopt('w',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH));
+  int fps       = getopt('r',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FPS));
   //  int numFrames = (int) cvGetCaptureProperty(capture,  CV_CAP_PROP_FRAME_COUNT);
 
   //int fps     = 25;  // or 30
   //int frameW  = getopt('w', 800); // 744 for firewire cameras
   //int frameH  = getopt('h', 600); // 480 for firewire cameras
 
-  CvVideoWriter *vid_write = cvCreateVideoWriter("out.avi",CV_FOURCC('D','I','V','X'),
+  //printf("framerate=%d\n",fps); fflush(stdout);
+
+  CvVideoWriter *vid_write = cvCreateVideoWriter("out.avi",
+						 CV_FOURCC('M','J','P','G'),
+						 //CV_FOURCC('F','L','V','1'),
 						 fps,cvSize(frameW,frameH),1);
 
   for(;;) {
