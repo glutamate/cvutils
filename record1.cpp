@@ -13,6 +13,9 @@ int main(int argc,char *argv[])
   gargv = argv;
 
   int c;
+
+  int stopit = 0;
+
   IplImage* color_img;
 
   CvCapture* cv_cap = cvCaptureFromCAM(getopt('c', 0));
@@ -20,8 +23,11 @@ int main(int argc,char *argv[])
   cvNamedWindow("Video",0); // create window
   color_img = cvQueryFrame(cv_cap); // get frame
   int frameH    = getopt('h',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT));
+  cvSetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT, (double) frameH);
   int frameW    = getopt('w',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH));
+  cvSetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH, (double) frameW);
   int fps       = getopt('r',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FPS));
+  cvSetCaptureProperty(cv_cap, CV_CAP_PROP_FPS, (double) fps);
   //  int numFrames = (int) cvGetCaptureProperty(capture,  CV_CAP_PROP_FRAME_COUNT);
 
   //int fps     = 25;  // or 30
@@ -30,25 +36,40 @@ int main(int argc,char *argv[])
 
   //printf("framerate=%d\n",fps); fflush(stdout);
 
-  CvVideoWriter *vid_write = cvCreateVideoWriter("out.avi",
-						 CV_FOURCC('M','J','P','G'),
-						 //CV_FOURCC('F','L','V','1'),
-						 fps,cvSize(frameW,frameH),1);
+  int nframes = fps*60*getopt('m',60);
+  int frcount=0, vidcount=0;
+
+  char vidnm[80];
+
+  CvVideoWriter *vid_write;
 
   for(;;) {
-    color_img = cvQueryFrame(cv_cap); // get frame
-    if(color_img != 0)
-      cvShowImage("Video", color_img); // show frame
-    c = cvWaitKey(10); // wait 10 ms or for key stroke
-    //    printf("%d\n",c);
+    sprintf(vidnm, "out%d.avi",vidcount);
+    vid_write= cvCreateVideoWriter(vidnm,
+				   CV_FOURCC('M','J','P','G'),
+				   //CV_FOURCC('F','L','V','1'),
+				   fps,cvSize(frameW,frameH),1);
+    
+    for(frcount = 0;frcount < nframes;frcount++) {
+      color_img = cvQueryFrame(cv_cap); // get frame
+      if(color_img != 0)
+	cvShowImage("Video", color_img); // show frame
+      c = cvWaitKey(10); // wait 10 ms or for key stroke
+      //    printf("%d\n",c);
+      
+      if(c == 27) {
+	stopit = 1;
+	break; // if ESC, break and quit
+      }
+      cvWriteFrame( vid_write, color_img);
+    }
+    /* clean up */
 
-    if(c == 27)
-      break; // if ESC, break and quit
-    cvWriteFrame( vid_write, color_img);
+    cvReleaseVideoWriter( &vid_write);
+    if(stopit == 1) break;
+    vidcount++;
   }
-  /* clean up */
   cvReleaseCapture( &cv_cap );
-  cvReleaseVideoWriter( &vid_write);
   cvDestroyWindow("Video");
   return 0;
 }
