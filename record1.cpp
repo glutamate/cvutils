@@ -42,11 +42,13 @@ int main(int argc,char *argv[])
   char vidnm[80];
 
   CvVideoWriter *vid_write;
+  printf("frames per movie = %d\n",nframes); fflush(stdout);
 
   for(;;) {
     sprintf(vidnm, "out%d.avi",vidcount);
     vid_write= cvCreateVideoWriter(vidnm,
-				   CV_FOURCC('M','J','P','G'),
+				   //CV_FOURCC('M','J','P','G'),
+				   CV_FOURCC('D','I','V','X'),
 				   //CV_FOURCC('F','L','V','1'),
 				   fps,cvSize(frameW,frameH),1);
     

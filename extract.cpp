@@ -34,7 +34,7 @@ int main(int argc,char *argv[])
   }
   color_img = cvQueryFrame(cv_cap); // get frame
   printf("frameix=%g\n", cvGetCaptureProperty(cv_cap, CV_CAP_PROP_POS_FRAMES));
-  msec = cvGetCaptureProperty(cv_cap, CV_CAP_PROP_POS_FRAMES);
+  msec = cvGetCaptureProperty(cv_cap, CV_CAP_PROP_POS_MSEC);
   printf("msec=%g \n", msec);
   printf("sec=%g \n", msec/1000);
   cvSaveImage("out.png",color_img);
