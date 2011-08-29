@@ -1,0 +1,17 @@
+Name:                cvutils
+Version:             0.1
+Description:         opencv utility functions
+License:             BSD3
+License-file:        LICENSE
+Author:              Tom Nielsen
+Maintainer:          tanielsen@gmail.com
+build-type:          Simple
+
+
+Library 
+   Exposed-modules:     CVUtils
+   Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
+                        random, unix, directory, process,containers,bytestring,binary,
+                        gnewplot, hmatrix>=0.11.0.0, storablevector, Codec-Image-DevIL, array, storable-tuple, probably>0.1
+
+
