@@ -30,4 +30,4 @@ Executable track
 --   other-modules:    EvalM
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
-                        gnewplot, hmatrix>=0.11.0.0, storablevector, Codec-Image-DevIL, array, storable-tuple, probably>0.1
+                        gnewplot, hmatrix>=0.11.0.0, storablevector, Codec-Image-DevIL, array, storable-tuple, probably>0.1, baysig>0.0.1
