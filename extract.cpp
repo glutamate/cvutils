@@ -37,7 +37,7 @@ int main(int argc,char *argv[])
   msec = cvGetCaptureProperty(cv_cap, CV_CAP_PROP_POS_MSEC);
   printf("msec=%g \n", msec);
   printf("sec=%g \n", msec/1000);
-  cvSaveImage(".png",color_img);
+  cvSaveImage("extract.png",color_img);
 
   cvReleaseCapture( &cv_cap );
   return 0;

@@ -71,7 +71,7 @@ nparticles = 100
 radiusi = round radius
 maxOn f xs = ceiling $ foldr1 max $ map f xs
 minOn f xs = floor $ foldr1 min $ map f xs
-
+ 
 particleLike :: Image -> Image -> [Obj] -> [(Obj,R)]
 particleLike bgim im objs = map pL objs where
   xs = [minOn (fst . pos) objs - radiusi..maxOn (fst . pos) objs+radiusi ] -- calc region of interest from all objs
@@ -98,4 +98,7 @@ gaussR mu = lpdf . word8ToR
          lpdf x = log (sqrt (tau/2.0*pi)) + (0.0-((x-mu)*(x-mu)*tau))
          tau = pixelNoise
 
+word8ToR :: Word8 -> Double
 word8ToR = (/256) . realToFrac . fromEnum
+realToW8 :: Double -> Word8
+realToW8 = toEnum . round. (*256) 
