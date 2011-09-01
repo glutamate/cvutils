@@ -8,15 +8,24 @@ Maintainer:          tanielsen@gmail.com
 build-type:          Simple
 Cabal-Version:       >= 1.8
 
-Library 
-   Exposed-modules:     CVUtils
-   Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
-                        random, unix, directory, process,containers,bytestring,binary,
-                        gnewplot, hmatrix>=0.11.0.0, storablevector, Codec-Image-DevIL, array, storable-tuple, probably>0.1
+--Library 
+--   Exposed-modules:     CVUtils
+--   Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
+--                        random, unix, directory, process,containers,bytestring,binary,
+--                        gnewplot, hmatrix>=0.11.0.0, storablevector, Codec-Image-DevIL, array, storable-tuple, probably>0.1
 
 Executable mix 
 --   Hs-source-dirs:   prog
    Main-Is:          Mix.hs
+   ghc-options:      -O2 -threaded
+--   other-modules:    EvalM
+   Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
+                        random, unix, directory, process,containers,bytestring,binary,
+                        gnewplot, hmatrix>=0.11.0.0, storablevector, Codec-Image-DevIL, array, storable-tuple, probably>0.1
+
+Executable track
+--   Hs-source-dirs:   prog
+   Main-Is:          CVUtils.hs
    ghc-options:      -O2 -threaded
 --   other-modules:    EvalM
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
