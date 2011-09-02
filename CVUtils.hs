@@ -17,6 +17,7 @@ import Data.Array.Unboxed
 import Numeric.LinearAlgebra 
 import qualified Math.Probably.PDF as PDF
 import Data.List
+import Control.Applicative
 import Data.Ord
 
 
@@ -25,18 +26,24 @@ type R = Double
 type Image = UArray (Int, Int, Int) Word8
 type MImage = IOUArray (Int, Int, Int) Word8
 
-data Obj = Obj {posx :: !R, posy :: !R, rot :: !R  } deriving Show
+data Obj = 
+  Obj {velx :: !R,
+       vely :: !R,
+       vrot :: !R,
+       posx :: !R, 
+       posy :: !R, 
+       rot :: !R  } deriving Show
 
 {-track1 :: Image -> [Obj] -> Image -> Sampler Obj
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
 evolve :: Obj -> Sampler Obj
-evolve (Obj x y rot) = do
-        nx <- gaussD x 0.5
-        ny <- gaussD y 0.5
-        nrot <- gaussD rot 0.1
-        return $ Obj nx ny nrot
+evolve (Obj vx vy vrot x y rot) = do
+        nvx <- gaussD vx 0.5
+        nvy <- gaussD vy 0.5
+        nvrot <- gaussD vrot 0.1
+        return $ Obj nvx nvy nvrot (x+vx) (y+vy) (rot+nvrot)
 
 track :: StaticParams -> Image -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
 track sp bgIm vidfnm startfrm nframes obj0 = do
@@ -60,12 +67,14 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            lift $ print2 "sumws: "  (sumWeights wparticles)
            nextObjs <- sample $ sequence 
                               $ replicate nparticles tracker 
-           let ((mx, my),mrot) 
-                 = runStat (both (both (before meanF posx) 
-                                    (before meanF posy))
-                                 (before meanF rot))
+           let mobj 
+                 = runStat (pure Obj <*> before meanF velx
+                                     <*> before meanF vely
+                                     <*> before meanF vrot
+                                     <*> before meanF posx
+                                     <*> before meanF posy
+                                     <*> before meanF rot)
                               nextObjs
-           let mobj = Obj mx my mrot
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
 --           lift $ hFlush h
            when (i `rem` 10 == 0) $ do 
