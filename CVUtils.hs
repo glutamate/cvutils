@@ -1,3 +1,5 @@
+{-# LANGUAGE ViewPatterns #-}
+
 module Main where
 
 import Codec.Image.DevIL
@@ -9,6 +11,7 @@ import Control.Monad.State.Strict
 import System.Cmd
 import System.Environment
 import Data.Array.IO
+import System.IO
 import Baysig.Estimate.RTS
 import Data.Array.Unboxed
 import Numeric.LinearAlgebra 
@@ -19,31 +22,36 @@ import Data.Ord
 
 type R = Double
 
-type Pos = (R,R)
 type Image = UArray (Int, Int, Int) Word8
 type MImage = IOUArray (Int, Int, Int) Word8
 
-data Obj = Obj {pos :: Pos, rot :: R  } deriving Show
+data Obj = Obj {posx :: !R, posy :: !R, rot :: !R  } deriving Show
 
 {-track1 :: Image -> [Obj] -> Image -> Sampler Obj
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
-diffuse :: Obj -> Sampler Obj
-diffuse (Obj (x,y) rot) = do
-        nx <- gaussD x 1
-        ny <- gaussD y 1
+evolve :: Obj -> Sampler Obj
+evolve (Obj x y rot) = do
+        nx <- gaussD x 0.5
+        ny <- gaussD y 0.5
         nrot <- gaussD rot 0.1
-        return $ Obj (nx,ny) nrot
+        return $ Obj nx ny nrot
 
-track :: StaticParams -> Image -> String -> Int -> Obj -> StateT Seed IO [(R,R)]
-track sp bgIm vidfnm nframes obj0 = do
-  go bgIm (replicate nparticles obj0) [1..nframes] where
-    go bgIm objs [] = return []
-    go bgIm objs (i:is) = do
+track :: StaticParams -> Image -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
+track sp bgIm vidfnm startfrm nframes obj0 = do
+  let outFnm = takeWhile (/='.') vidfnm ++ ".pos"
+  h<- lift $ openFile outFnm WriteMode 
+  res <- go h bgIm (replicate nparticles obj0) [startfrm..startfrm+nframes] 
+  lift $ hClose h
+  return res
+   where
+    go _ bgIm objs [] = return []
+    go h bgIm objs (i:is) = do
            lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
            frame <- lift $ readImage "extract.png"
-           diffObjs <- sample $ mapM diffuse objs
+           diffObjs <- sample $ mapM evolve objs
+           lift $ print2  "pixel1Red = " (frame!(0,0,0))
            let wparticles = dropLosers $ particleLike sp bgIm frame diffObjs
            let tracker = samplingImportanceResampling wparticles
            --lift $ mapM_ print wparticles
@@ -52,12 +60,19 @@ track sp bgIm vidfnm nframes obj0 = do
            lift $ print2 "sumws: "  (sumWeights wparticles)
            nextObjs <- sample $ sequence 
                               $ replicate nparticles tracker 
-           markedIm <- lift $ markObjsOnImage nextObjs frame
-           lift $ writeImage ("frame"++show i++".png") markedIm
-           rest <- go bgIm nextObjs is
-           return $ (runStat (both (before meanF (fst .pos)) 
-                                   (before meanF (snd .pos)))
-                              nextObjs):rest
+           let ((mx, my),mrot) 
+                 = runStat (both (both (before meanF posx) 
+                                    (before meanF posy))
+                                 (before meanF rot))
+                              nextObjs
+           let mobj = Obj mx my mrot
+           lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
+--           lift $ hFlush h
+           when (i `rem` 10 == 0) $ do 
+             markedIm <- lift $ markEllipse sp (mobj) frame
+             lift $ writeImage ("frame"++show i++".png") markedIm
+           rest <- go h bgIm nextObjs is
+           return $ mobj:rest
           
 print2 x y = putStrLn $ x ++show y
 
@@ -97,24 +112,24 @@ nparticles = 1000
 maxOn f xs = ceiling $ foldr1 max $ map f xs
 minOn f xs = floor $ foldr1 min $ map f xs
  
-data StaticParams = SP {noise :: R,
-                        length :: R,
-                        eccentric :: R } deriving Show
+data StaticParams = SP {noise :: !R,
+                        length :: !R,
+                        eccentric :: !R } deriving Show
 
 particleLike :: StaticParams -> Image -> Image -> [Obj] -> [(Obj,R)]
 particleLike sp@(SP noise len ecc) bgim im objs = map pL objs where
-  radiusi = round len + 5
-  xs = [minOn (fst . pos) objs - radiusi..maxOn (fst . pos) objs+radiusi ] -- calc region of interest from all objs
-  ys = [minOn (snd . pos) objs-radiusi..maxOn (snd . pos) objs+radiusi]
-  pL o@(Obj (cx,cy) rot) = 
-    let f1x = cx+(len/ecc)*cos rot
-        f1y = cx+(len/ecc)*sin rot
-        f2x = cx-(len/ecc)*cos rot
-        f2y = cx-(len/ecc)*sin rot
+  radiusi = 2* ceiling (len*ecc) + 1
+  xs = [minOn (posx) objs - radiusi..maxOn (posx) objs+radiusi ] -- calc region of interest from all objs
+  ys = [minOn (posy) objs-radiusi..maxOn posy objs+radiusi]
+  pL o@(Obj cx cy rot) = 
+    let f1x = cx+(len*ecc)*cos rot
+        f1y = cy+(len*ecc)*sin rot
+        f2x = cx-(len*ecc)*cos rot
+        f2y = cy-(len*ecc)*sin rot
         f rot cx cy x y ch 
          = if dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) < 2 * len
-              then gaussR noise 0 $ im!(y,x,ch)
-              else gaussW8 noise (bgim!(y,x,ch)) $ im!(y,x,ch)
+              then gaussRnn noise 0 $ im!(y,x,ch)
+              else gaussW8nn noise (bgim!(y,x,ch)) $ im!(y,x,ch)
     in (o, sum [ f rot cx cy x y chan | 
                    x <- xs, 
                    y <- ys, 
@@ -127,11 +142,21 @@ gaussW8 :: R -> Word8 -> Word8 -> R
 gaussW8 tau muw8 = lpdf . word8ToR  
    where lpdf x = log (sqrt (tau/2.0*pi)) + (0.0-((x-mu)*(x-mu)*tau))
          mu = word8ToR  muw8
-         
 gaussR :: R-> R -> Word8 -> R
 gaussR tau mu = lpdf . word8ToR  
    where lpdf :: R -> R
          lpdf x = log (sqrt (tau/2.0*pi)) + (0.0-((x-mu)*(x-mu)*tau))
+
+--no-noise versions
+gaussW8nn :: R -> Word8 -> Word8 -> R
+gaussW8nn tau muw8 = lpdf . word8ToR  
+   where lpdf x = negate $ (((x-mu)^2)*tau)
+         mu = word8ToR  muw8
+gaussRnn :: R-> R -> Word8 -> R
+gaussRnn tau mu = lpdf . word8ToR  
+   where lpdf :: R -> R
+         lpdf x =  negate $ (((x-mu)^2)*tau)
+
 
 word8ToR :: Word8 -> Double
 word8ToR = (/256) . realToFrac . fromEnum
@@ -141,46 +166,47 @@ realToW8 = toEnum . round. (*256)
 markObjsOnImage :: [Obj] -> Image -> IO (Image)
 markObjsOnImage objs im = do
     mutIm <- thaw im
-    forM_ objs $ \(Obj (cx,cy) _) -> mkRed mutIm (round cx) (round cy)
+    forM_ objs $ \(Obj cx cy _) -> mkRed mutIm (round cx) (round cy)
     freeze (mutIm::MImage)
     
          
 mkRed arr cx cy = do 
           writeArray arr ( cy,
                              cx, 0) 255
-          writeArray arr ( cy,
-                             cx, 1) 0
-          writeArray arr ( cy,
-                             cx, 2) 0
+--          writeArray arr ( cy,
+--                             cx, 1) 0
+--          writeArray arr ( cy,
+--                             cx, 2) 0
 
 main = do
      ilInit
-     bgnm : fvid : pt0 : _ <- getArgs
+     bgnm : fvid : (read -> x) : (read -> y) : (read -> rot) :_ <- getArgs
      system $ "~/cvutils/extract "++fvid++" 1"
      bgIm <-readImage bgnm
      frame0 <-readImage "extract.png"
-     let (x,y) = read pt0
      {-marked <- markObjsOnImage [Obj (x,y) 0, 
                                 Obj (x+1,y) 0, 
                                 Obj (x,y+1) 0, 
                                 Obj (x+1,y+1) 0] frame0
      writeImage "marked.png" marked -}
-     let initialsV = fromList [x,y,218, 8, negate (pi/6), 0.4]
-         posterior = posteriorV bgIm frame0 (round x,round y)
+     let posterior = posteriorV bgIm frame0 (round x,round y)
          postAndV v = (posteriorV bgIm frame0 (round x,round y) $ fromList v, v)
-         sp = (SP 218 20 0.8)
-     ellim <- markEllipse sp  (Obj (x,y) $ negate (pi/6)) frame0
+         sp = (SP 218 6 0.9)
+--         rot = negate (pi/7)
+         initialsV = fromList [x,y,218, 6, rot, 0.9]
+     ellim <- markEllipse sp  (Obj  x y rot) frame0
      writeImage "markell.png" ellim
-     print $ postAndV [x,y,218, 8, negate (pi/6), 0.8]
-     print $ postAndV [x,y,218, 8, 0, 0.8]
-{-
+     print $ postAndV [x,y,216, 6, rot, 0.9]
+     print $ postAndV [x,y,218, 6, rot, 0.9]
+     print $ postAndV [x,y,220, 6, rot, 0.9]
+
      runRIO $ do
-         iniampar <- sample $ initialAdaMet 100 5e-4 posterior initialsV
-         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
-         lift $ print v
+--         iniampar <- sample $ initialAdaMet 500 1e-4 posterior initialsV
+--         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
+--         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
---         track (SP 218 6 0.8) bgIm fvid 300 $ Obj (x,y) 0
-     -}
+         track sp bgIm fvid 1020 100 $ Obj x y 0
+     
      return () 
 
 posteriorV :: Image -> Image -> (Int, Int) -> Vector R -> R
@@ -201,10 +227,10 @@ posteriorV bgim im (cx,cy) v =
         len = v@> 3
         rot = v@> 4
         ecc = v@> 5
-        f1x = px+(len/ecc)*cos rot
-        f1y = py+(len/ecc)*sin rot
-        f2x = px-(len/ecc)*cos rot
-        f2y = py-(len/ecc)*sin rot
+        f1x = px+(len*ecc)*cos rot
+        f1y = py+(len*ecc)*sin rot
+        f2x = px-(len*ecc)*cos rot
+        f2y = py-(len*ecc)*sin rot
         f :: Int -> Int -> Int -> R
         f x y ch 
          = if dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) < 2 * len
@@ -212,7 +238,7 @@ posteriorV bgim im (cx,cy) v =
               else gaussW8 noise (bgim!(y,x,ch)) $ im!(y,x,ch)
 
 markEllipse :: StaticParams -> Obj -> Image -> IO (Image)
-markEllipse sp@(SP noise len ecc) (Obj (px, py) rot) im = do
+markEllipse sp@(SP noise len ecc) (Obj px py rot) im = do
     mutIm <- thaw im
     
     let cx = round px
@@ -227,7 +253,7 @@ markEllipse sp@(SP noise len ecc) (Obj (px, py) rot) im = do
     print $ dist (f1x,f1y) (cx, cy)
     let f x y = do -- print2 "f at" (x,y,dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) )
                    when (dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) < 2 * len) $ do
-                      print2 "red at " (x,y) 
+                      --print2 "red at " (x,y) 
                       mkRed mutIm x y
     sequence_ [ f x y  | 
                    x <- [ (cx::Int) -50.. cx +50],
