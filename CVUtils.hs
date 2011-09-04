@@ -41,7 +41,7 @@ data Obj =
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
-sdv = 0.5
+sdv = 0.2
 sdvrot = 0.1
 evolve :: Obj -> Sampler (Obj,Obj)
 evolve o@(Obj vx vy vrot x y rot) = do
@@ -52,20 +52,25 @@ evolve o@(Obj vx vy vrot x y rot) = do
 
 type Square = (Pos,Pos)
 
-within :: Square -> Obj -> Bool
-within ((lox,loy), (hix,hiy)) (Obj _ _ _ ox oy _) 
+within :: Square -> R -> R -> Bool
+within ((lox,loy), (hix,hiy)) ox oy
        =    ox > min lox hix
          && ox < max lox hix
          && oy > min loy hiy
          && oy < max loy hiy
 
-nogo :: [Square]
+invisible = [ ((963,627), 
+               (999,653))]
+
+visible x y  = not $ any (\sqr -> within sqr (realToFrac x) (realToFrac y)) invisible
+
+nogo, invisible :: [Square]
 nogo = 
-  [ ((980,640), (996,653))]
+  [ ((963,627), (994,653))]
 
 nogoPrior :: Obj -> R
 nogoPrior o = sum $ map f nogo
-          where  f sqr | within sqr o = -1e10
+          where  f sqr | within sqr (posx o) (posy o) = -1e10
                        | otherwise = 0
 
 prevprior :: Obj -> (Obj -> R)
@@ -109,7 +114,7 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
                               nextObjs
            lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
---           lift $ hFlush h
+           lift $ hFlush h
            when (i `rem` 5 == 0) $ do 
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
@@ -152,7 +157,7 @@ particleLike sp@(SP noise len ecc) bgim im objprs = map pL objprs where
         f2x = cx-(len*ecc)*cos rot
         f2y = cy-(len*ecc)*sin rot
         f rot cx cy x y ch 
-         = if dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) < 2 * len
+         = if (dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) < 2 * len) && visible x y
               then gaussRnn noise 0 $ im!(y,x,ch)
               else gaussW8nn noise (bgim!(y,x,ch)) $ im!(y,x,ch)
     in (o, nogoPrior o + prevprior old o + sum [ f rot cx cy x y chan | 
