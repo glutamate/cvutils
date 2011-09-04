@@ -14,15 +14,18 @@ import Data.Array.IO
 import System.IO
 import Baysig.Estimate.RTS
 import Data.Array.Unboxed
-import Numeric.LinearAlgebra 
+import Numeric.LinearAlgebra hiding (find)
 import qualified Math.Probably.PDF as PDF
 import Data.List
+import Data.Maybe
 import Control.Applicative
 import Data.Ord
 
 
 type R = Double
 
+
+type Pos = (R,R)
 type Image = UArray (Int, Int, Int) Word8
 type MImage = IOUArray (Int, Int, Int) Word8
 
@@ -38,16 +41,45 @@ data Obj =
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
-evolve :: Obj -> Sampler Obj
-evolve (Obj vx vy vrot x y rot) = do
-        nvx <- gaussD vx 0.5
-        nvy <- gaussD vy 0.5
-        nvrot <- gaussD vrot 0.1
-        return $ Obj nvx nvy nvrot (x+vx) (y+vy) (rot+nvrot)
+sdv = 0.5
+sdvrot = 0.1
+evolve :: Obj -> Sampler (Obj,Obj)
+evolve o@(Obj vx vy vrot x y rot) = do
+        nvx <- gaussD vx sdv
+        nvy <- gaussD vy sdv
+        nvrot <- gaussD vrot sdvrot
+        return $ (o,Obj nvx nvy nvrot (x+nvx) (y+nvy) (rot+nvrot))
+
+type Square = (Pos,Pos)
+
+within :: Square -> Obj -> Bool
+within ((lox,loy), (hix,hiy)) (Obj _ _ _ ox oy _) 
+       =    ox > min lox hix
+         && ox < max lox hix
+         && oy > min loy hiy
+         && oy < max loy hiy
+
+nogo :: [Square]
+nogo = 
+  [ ((980,640), (996,653))]
+
+nogoPrior :: Obj -> R
+nogoPrior o = sum $ map f nogo
+          where  f sqr | within sqr o = -1e10
+                       | otherwise = 0
+
+prevprior :: Obj -> (Obj -> R)
+prevprior (Obj vx vy vrot _ _ _) 
+      (Obj nvx nvy nvrot _ _ _) 
+        =   PDF.gaussD vx sdv nvx
+          + PDF.gaussD vy sdv nvy
+          + PDF.gaussD vrot sdvrot nvy
+
+fileroot = reverse . takeWhile (/='/') . reverse . takeWhile (/='.')
 
 track :: StaticParams -> Image -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
 track sp bgIm vidfnm startfrm nframes obj0 = do
-  let outFnm = takeWhile (/='.') vidfnm ++ ".pos"
+  let outFnm = fileroot vidfnm ++ ".pos"
   h<- lift $ openFile outFnm WriteMode 
   res <- go h bgIm (replicate nparticles obj0) [startfrm..startfrm+nframes] 
   lift $ hClose h
@@ -60,13 +92,13 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            diffObjs <- sample $ mapM evolve objs
            lift $ print2  "pixel1Red = " (frame!(0,0,0))
            let wparticles = dropLosers $ particleLike sp bgIm frame diffObjs
-           let tracker = samplingImportanceResampling wparticles
-           --lift $ mapM_ print wparticles
-           lift $ print2 "smallest: "  (smallest wparticles)
-           --lift $ print2 "largest: "  (largest wparticles)
-           lift $ print2 "sumws: "  (sumWeights wparticles)
+           let smws = sumWeights wparticles
+           let cummSmws = cummWeightedSamples wparticles
            nextObjs <- sample $ sequence 
-                              $ replicate nparticles tracker 
+                              $ replicate nparticles
+                              $ do u <- unitSample
+                                   return . fst . fromJust $ find ((>=u*smws) . snd) cummSmws
+
            let mobj 
                  = runStat (pure Obj <*> before meanF velx
                                      <*> before meanF vely
@@ -75,10 +107,12 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
                                      <*> before meanF posy
                                      <*> before meanF rot)
                               nextObjs
+           lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
 --           lift $ hFlush h
-           when (i `rem` 10 == 0) $ do 
-             markedIm <- lift $ markEllipse sp (mobj) frame
+           when (i `rem` 5 == 0) $ do 
+             markedIm1 <- lift $ markEllipse sp (mobj) frame     
+             markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show i++".png") markedIm
            rest <- go h bgIm nextObjs is
            return $ mobj:rest
@@ -97,25 +131,6 @@ dropLosers ws =
   in filter p srt
 
 subtr x y = y - x
-
-{-trackVideo :: Image -> [Image] -> Obj -> Sampler [[Obj]]
-trackVideo bgIm ims' o0 = go (replicate nparticles o0) ims' where
-  go objs [] = return []
-  go objs (im:ims) = do
-    diffObjs <- mapM diffuse objs
-    let wparticles = particleLike bgIm im diffObjs
-    let tracker = samplingImportanceResampling wparticles
-    nextObjs <- sequence $ replicate nparticles $ tracker 
-    rest <- go nextObjs ims
-    return $ nextObjs:rest -}
-
-{-sample :: Sampler a -> StateT Seed IO a
-sample (Sam sam) = do
-       sd <- get
-       let (x,nsd) = sam sd
-       put nsd
-       return x -}
-
 nparticles = 1000
 
 maxOn f xs = ceiling $ foldr1 max $ map f xs
@@ -125,12 +140,13 @@ data StaticParams = SP {noise :: !R,
                         length :: !R,
                         eccentric :: !R } deriving Show
 
-particleLike :: StaticParams -> Image -> Image -> [Obj] -> [(Obj,R)]
-particleLike sp@(SP noise len ecc) bgim im objs = map pL objs where
-  radiusi = 2* ceiling (len*ecc) + 1
+particleLike :: StaticParams -> Image -> Image -> [(Obj,Obj)] -> [(Obj,R)]
+particleLike sp@(SP noise len ecc) bgim im objprs = map pL objprs where
+  radiusi = 2* ceiling (len*ecc) + 10
+  objs = map snd objprs
   xs = [minOn (posx) objs - radiusi..maxOn (posx) objs+radiusi ] -- calc region of interest from all objs
   ys = [minOn (posy) objs-radiusi..maxOn posy objs+radiusi]
-  pL o@(Obj cx cy rot) = 
+  pL (old,o@(Obj _ _ _ cx cy rot)) = 
     let f1x = cx+(len*ecc)*cos rot
         f1y = cy+(len*ecc)*sin rot
         f2x = cx-(len*ecc)*cos rot
@@ -139,7 +155,7 @@ particleLike sp@(SP noise len ecc) bgim im objs = map pL objs where
          = if dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) < 2 * len
               then gaussRnn noise 0 $ im!(y,x,ch)
               else gaussW8nn noise (bgim!(y,x,ch)) $ im!(y,x,ch)
-    in (o, sum [ f rot cx cy x y chan | 
+    in (o, nogoPrior o + prevprior old o + sum [ f rot cx cy x y chan | 
                    x <- xs, 
                    y <- ys, 
                    chan <- [0..2]])
@@ -175,7 +191,11 @@ realToW8 = toEnum . round. (*256)
 markObjsOnImage :: [Obj] -> Image -> IO (Image)
 markObjsOnImage objs im = do
     mutIm <- thaw im
-    forM_ objs $ \(Obj cx cy _) -> mkRed mutIm (round cx) (round cy)
+    forM_ objs $ \(Obj _ _ _ cx cy _) -> do
+          writeArray mutIm (round cy, round cx, 2) 255
+          writeArray mutIm (round cy, round cx, 0) 0
+          writeArray mutIm (round cy, round cx, 1) 0
+
     freeze (mutIm::MImage)
     
          
@@ -203,7 +223,8 @@ main = do
          sp = (SP 218 6 0.9)
 --         rot = negate (pi/7)
          initialsV = fromList [x,y,218, 6, rot, 0.9]
-     ellim <- markEllipse sp  (Obj  x y rot) frame0
+         initObj =  (Obj 0 0 0 x y rot) 
+     ellim <- markEllipse sp initObj frame0
      writeImage "markell.png" ellim
      print $ postAndV [x,y,216, 6, rot, 0.9]
      print $ postAndV [x,y,218, 6, rot, 0.9]
@@ -214,7 +235,7 @@ main = do
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp bgIm fvid 1020 100 $ Obj x y 0
+         track sp bgIm fvid 1020 200 $ initObj
      
      return () 
 
@@ -247,7 +268,7 @@ posteriorV bgim im (cx,cy) v =
               else gaussW8 noise (bgim!(y,x,ch)) $ im!(y,x,ch)
 
 markEllipse :: StaticParams -> Obj -> Image -> IO (Image)
-markEllipse sp@(SP noise len ecc) (Obj px py rot) im = do
+markEllipse sp@(SP noise len ecc) (Obj _ _ _ px py rot) im = do
     mutIm <- thaw im
     
     let cx = round px
