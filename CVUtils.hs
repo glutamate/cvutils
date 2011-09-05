@@ -79,6 +79,10 @@ nogoPrior o = sum $ map f nogo
           where  f sqr | within sqr (posx o) (posy o) = -1e100
                        | otherwise = 0
 
+nogoObj :: Obj -> Bool
+nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo
+
+
 prevprior :: Obj -> (Obj -> R)
 prevprior (Obj vx vy vrot _ _ _) 
       (Obj nvx nvy nvrot _ _ _) 
@@ -102,15 +106,15 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            frame <- lift $ readImage "extract.png"
            diffObjs <- sample $ mapM evolve objs
            lift $ print2  "pixel1Red = " (frame!(0,0,0))
-           let wparticles = dropLosers $ particleLike sp bgIm frame diffObjs
+           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame diffObjs)
            let anyInvisible = any objCentreInvisible $ map fst wparticles
-           let npart = if anyInvisible then 5*nparticles else nparticles
+           let npart = if anyInvisible then 20*nparticles else nparticles
            let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/5)) wparticles else wparticles
 
            let smws = sumWeights wparticles'
            let cummSmws = cummWeightedSamples wparticles'
            lift $ print2 "npart=" npart          
-           lift $ print2 "nwinners= " (length wparticles')
+           lift $ print2 "winners= " (map snd wparticles')
            lift $ hFlush stdout
            nextObjs <- sample $ sequence 
                               $ replicate npart
@@ -129,7 +133,7 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
-           when (i `rem` 5 == 0) $ do 
+           when (i `rem` 50 == 0) $ do 
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show i++".png") markedIm
@@ -161,11 +165,23 @@ data StaticParams = SP {noise :: !R,
                         eccentric :: !R } deriving Show
 
 particleLike :: StaticParams -> Image -> Image -> [(Obj,Obj)] -> [(Obj,R)]
-particleLike sp@(SP noise len ecc) bgim im objprs = map pL objprs where
+particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (map pL objprs) where
   radiusi = 2* ceiling (len*ecc) + 2
   objs = map snd objprs
-  xs = [minOn (posx) objs - radiusi..maxOn (posx) objs+radiusi ] -- calc region of interest from all objs
-  ys = [minOn (posy) objs-radiusi..maxOn posy objs+radiusi]
+  xmin =minOn (posx) objs - radiusi 
+  xmax = maxOn (posx) objs+radiusi
+  ymin = minOn (posy) objs-radiusi
+  ymax = maxOn posy objs+radiusi
+  xs = [xmin.. xmax] -- calc region of interest from all objs
+  ys = [ymin..ymax]
+  ifInside = (array ((xmin,ymin),(xmax,ymax)) [ ((x,y),(gaussRnn noise 0 $ im!(y,x,0)) + (gaussRnn noise 0 $ im!(y,x,1)) + (gaussRnn noise 0 $ im!(y,x,2)))
+                                               | x <- xs, 
+                                                 y <- ys])::UArray (Int,Int) R
+  ifoutside = (array ((xmin,ymin),(xmax,ymax)) [ ((x,y),(gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))+ (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
+                                                          +(gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2)))
+                                               | x <- xs, 
+                                                 y <- ys])::UArray (Int,Int) R
+ 
   pL (old,o@(Obj _ _ _ cx cy rot)) = 
     let f1x = cx+(len*ecc)*cos rot
         f1y = cy+(len*ecc)*sin rot
@@ -174,11 +190,10 @@ particleLike sp@(SP noise len ecc) bgim im objprs = map pL objprs where
         f rot cx cy x y  
           | not $ visible x y = 0
           | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
-               =  {-# SCC "gaussrn" #-} (gaussRnn noise 0 $ im!(y,x,0)) + (gaussRnn noise 0 $ im!(y,x,1)) + (gaussRnn noise 0 $ im!(y,x,2))
+               =  {-# SCC "gaussrn" #-} ifInside!(x,y) --(gaussRnn noise 0 $ im!(y,x,0)) + (gaussRnn noise 0 $ im!(y,x,1)) + (gaussRnn noise 0 $ im!(y,x,2))
           | otherwise = 
-              {-# SCC "gaussw8rn" #-} (gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))+ (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
-                   +(gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2))
-    in (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (sum [ f rot cx cy x y  | 
+              {-# SCC "gaussw8rn" #-} ifoutside!(x,y) --(gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))+ (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1))  +(gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2))
+    in if nogoObj o then (o,-1e100) else (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (sum [ f rot cx cy x y  | 
                    x <- xs, 
                    y <- ys]))
 
@@ -260,7 +275,7 @@ main = do
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp bgIm fvid 1020 50 $ initObj
+         track sp bgIm fvid 1 6000 $ initObj
      
      return () 
 
@@ -313,7 +328,7 @@ markEllipse sp@(SP noise len ecc) (Obj _ _ _ px py rot) im = do
     let f x y = do -- print2 "f at" (x,y,dist (f1x,f1y) (x, y) + dist (f2x,f2y) (x, y) )
                    when (dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len) $ do
                       --print2 "red at " (x,y) 
-                      --mkRed mutIm x 
+                      mkRed mutIm x y
                       return ()
     sequence_ [ f x y  | 
                    x <- [ (cx::Int) -50.. cx +50],
@@ -332,3 +347,4 @@ uniformLogPdf from to = \x-> if x>=from && x <=to
 -- initial on wl0: (956,641)
 
 --rm marked.png && track mixed.png ~/Dropbox/woodlice/wl0.avi '(956,641)' && eog marked.png
+--rm -f frame*.png && sudo cabal install --global && track mixed.png ~/Dropbox/woodlice/wl0.avi 956 641 '-0.448'
