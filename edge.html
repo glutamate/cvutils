@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Edge Picker</title>
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js"></script>
+<style>
+  div#imcont {
+    width: 1856px;
+    height: 1044px;
+    overflow:scroll;
+  }
+</style>
+</head>
+<body>
+<div id ="imcont">
+<img class="toBeClicked" src="mixed.png" alt="Angry face" height="2880" width="5120"/>
+</div>
+<div id="output">
+</div>
+
+<script type="text/javascript">
+xs = new Array();
+ys = new Array(); 
+$(document).ready(
+  $("img.toBeClicked").click(function(e) {
+    var offset = $(this).offset();
+    var curout = $("#output").text()
+    xs.push(((e.clientX - offset.left))/4);
+    ys.push(((2880)-(e.clientY - offset.top))/4);
+//    $("#output").html(((e.clientX - offset.left))/4+","+((2880)-(e.clientY - offset.top))/4);
+    mkArray();
+  }));
+
+function mkArray() {
+var s = "["
+
+for(var i= 0; i<xs.length; i++) {
+   s+="("+xs[i]+","+ys[i]+"),";
+}
+
+$("#output").html(s);
+}
+
+</script>
+</body>
+
+</html>
+
