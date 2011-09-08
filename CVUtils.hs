@@ -21,9 +21,7 @@ import Data.Maybe
 import Control.Applicative
 import Data.Ord
 
-
 type R = Double
-
 
 type Pos = (R,R)
 type Image = UArray (Int, Int, Int) Word8
