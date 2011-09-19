@@ -12,33 +12,123 @@
 </style>
 </head>
 <body>
-<div id ="imcont">
-<img class="toBeClicked" src="mixed.png" alt="Angry face" height="2880" width="5120"/>
-</div>
+<span id="modetxt">Boxes</span><a href="javascript:changemode()">Change Mode</a>
+<canvas id="myCanvas" width="5120" height="2880">
+Fallback content, in case the browser does not support Canvas.
+</canvas>
 <div id="output">
 </div>
 
 <script type="text/javascript">
+
+// <div id ="imcont">
+// <img class="toBeClicked" src="mixed.png" alt="Angry face" height="2880" width="5120"/>
+// </div>
+
 xs = new Array();
 ys = new Array(); 
-$(document).ready(
-  $("img.toBeClicked").click(function(e) {
-    var offset = $(this).offset();
-    var curout = $("#output").text()
-    xs.push(((e.clientX - offset.left))/4);
-    ys.push(((2880)-(e.clientY - offset.top))/4);
-//    $("#output").html(((e.clientX - offset.left))/4+","+((2880)-(e.clientY - offset.top))/4);
-    mkArray();
-  }));
+
+boxes = new Array();
+
+mode = 0;
+half_pos = null;
+
+
+
+
+$(document).ready(function() {
+var canvas = document.getElementById('myCanvas');
+var ctx = canvas.getContext('2d');
+
+myimage = new Image();
+myimage.onload = function() {
+                     ctx.drawImage(myimage, 0, 0, 5120,2880);
+                 }
+myimage.src = 'mixed.png';
+
+$("#myCanvas").click(function(e){ 
+    var pos = getXY(e);
+    if(mode==0) { // boxes
+      if(half_pos) {
+        boxes.push([half_pos, pos]);        
+        mkBoxesTxt();
+        drawRect(half_pos, pos);
+        half_pos = null;
+      } else {
+        half_pos = pos;
+      }
+    } else { // edge
+      xs.push(pos.x);
+      ys.push(pos.y);
+      mkArray();  
+    }
+  });
+});
+
+function changemode() {
+   if(mode==0) {
+      mode=1;
+      $("#modetxt").html("Edge");
+   } else {
+      mode=0;
+      $("#modetxt").html("Boxes");
+      half_pos = null;
+   } 
+
+   xs = [];
+   ys = [];
+   $("#output").html("");
+}
+
+function drawRect(pos1, pos2) {
+   var canvas = document.getElementById('myCanvas');
+   var c = canvas.getContext('2d');
+   c.fillStyle = "rgba(0, 0, 200, 0.5)";
+   var minx = Math.min(pos1.x, pos2.x);
+   var maxx = Math.max(pos1.x, pos2.x);
+   var miny = Math.min(pos1.y, pos2.y);
+   var maxy = Math.max(pos1.y, pos2.y);
+   c.fillRect  (minx*4, (720-miny)*4, (maxx-minx)*4, (720-maxy-(720-miny))*4 );
+}
+
+function getXY(e) {
+var x;
+var y;
+
+var canvas = document.getElementById('myCanvas');
+
+if (e.pageX || e.pageY) { 
+  x = e.pageX;
+  y = e.pageY;
+}
+else { 
+  x = e.clientX + document.body.scrollLeft + document.documentElement.scrollLeft; 
+  y = e.clientY + document.body.scrollTop + document.documentElement.scrollTop; 
+} 
+x -= canvas.offsetLeft;
+y -= canvas.offsetTop;
+
+return {x : x/4, y : 720-y/4};
+}
 
 function mkArray() {
-var s = "["
+var s = "[";
 
 for(var i= 0; i<xs.length; i++) {
    s+="("+xs[i]+","+ys[i]+"),";
 }
 
 $("#output").html(s);
+}
+
+function mkBoxesTxt() {
+var s = "[";
+
+for(var i= 0; i<boxes.length; i++) {
+   s+="(("+boxes[i][0].x+","+boxes[i][0].y+"),("+boxes[i][1].x+","+boxes[i][1].y+")),";
+}
+$("#output").html(s);
+
 }
 
 </script>
