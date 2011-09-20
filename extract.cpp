@@ -28,10 +28,11 @@ int main(int argc,char *argv[])
 
   int frameid, frcount;
   sscanf(argv[2], "%d", &frameid); 
-  for(frcount = 0;frcount < frameid;frcount++) {
-    cvGrabFrame(cv_cap); // get frame
+  //for(frcount = 0;frcount < frameid;frcount++) {
+  cvSetCaptureProperty(cv_cap, CV_CAP_PROP_POS_FRAMES, frameid);
+   cvGrabFrame(cv_cap); // get frame
 
-  }
+  //}
   color_img = cvQueryFrame(cv_cap); // get frame
   printf("frameix=%g\n", cvGetCaptureProperty(cv_cap, CV_CAP_PROP_POS_FRAMES));
   msec = cvGetCaptureProperty(cv_cap, CV_CAP_PROP_POS_MSEC);
