@@ -69,8 +69,14 @@ objCentreInvisible (Obj _ _ _ cx cy _) = not $ visible (round cx) (round cy)
 
 nogo::  [Square]
 nogo = 
-  [ ((963,626), 
-     (997,663))]
+    [((1128,657.5),(1159.5,627.5)),
+     ((963.25,656),(997,626.5)),
+     ((836.5,653.75),(866.75,624.5)),
+     ((389.75,619.5),(359.75,648.75)),
+     ((162.75,309),(132,278.5)),
+     ((158.5,191.25),(127.25,160.75)),((422,72.25),(450.75,40.5)),((757.5,72),(728.5,41.75)),((1002.75,70.5),(974.25,39.75)),((1191,194),(1221,222.75)),((1185,435.25),(1213.5,463.5))]
+--  [ ((963,626), 
+--     (997,663))]
 
 nogoPrior :: Obj -> R
 nogoPrior o = sum $ map f nogo
@@ -94,12 +100,13 @@ track :: StaticParams -> Image -> String -> Int -> Int -> Obj -> StateT Seed IO 
 track sp bgIm vidfnm startfrm nframes obj0 = do
   let outFnm = fileroot vidfnm ++ ".pos"
   h<- lift $ openFile outFnm WriteMode 
-  res <- go h bgIm (replicate nparticles obj0) [startfrm..startfrm+nframes] 
+  res <- go h bgIm (replicate nparticles obj0) [startfrm..startfrm+nframes-1] 
   lift $ hClose h
   return res
    where
     go _ bgIm objs [] = return []
     go h bgIm objs (i:is) = do
+           lift $ putStrLn $"~/cvutils/extract "++vidfnm++" "++show i 
            lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
            frame <- lift $ readImage "extract.png"
            diffObjs <- sample $ mapM evolve objs
@@ -131,7 +138,7 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
-           when (i `rem` 50 == 0) $ do 
+           when (i `rem` 20 == 0) $ do 
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show i++".png") markedIm
@@ -172,13 +179,25 @@ particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (
   ymax = maxOn posy objs+radiusi
   xs = [xmin.. xmax] -- calc region of interest from all objs
   ys = [ymin..ymax]
-  ifInside = (array ((xmin,ymin),(xmax,ymax)) [ ((x,y),(gaussRnn noise 0 $ im!(y,x,0)) + (gaussRnn noise 0 $ im!(y,x,1)) + (gaussRnn noise 0 $ im!(y,x,2)))
-                                               | x <- xs, 
-                                                 y <- ys])::UArray (Int,Int) R
-  ifoutside = (array ((xmin,ymin),(xmax,ymax)) [ ((x,y),(gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))+ (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
-                                                          +(gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2)))
-                                               | x <- xs, 
-                                                 y <- ys])::UArray (Int,Int) R
+  ifInside, ifoutside, ifmixed ::UArray (Int,Int) R
+  ifInside = array ((xmin,ymin),(xmax,ymax)) 
+                   [((x,y),(gaussRnn noise 0 $ im!(y,x,0)) 
+                           + (gaussRnn noise 0 $ im!(y,x,1)) 
+                           + (gaussRnn noise 0 $ im!(y,x,2)))
+                       | x <- xs, 
+                         y <- ys]
+  ifoutside = array ((xmin,ymin),(xmax,ymax)) 
+                    [ ((x,y),(gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))
+                             + (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
+                             + (gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2)))
+                       | x <- xs, 
+                         y <- ys]
+  ifmixed   = array ((xmin,ymin),(xmax,ymax)) 
+                    [ ((x,y),(gaussW8nn noise (bgim!(y,x,0) `div` 2) $ im!(y,x,0))
+                             + (gaussW8nn noise (bgim!(y,x,1) `div` 2) $ im!(y,x,1)) 
+                             + (gaussW8nn noise (bgim!(y,x,2) `div` 2) $ im!(y,x,2)))
+                       | x <- xs, 
+                         y <- ys]
  
   pL (old,o@(Obj _ _ _ cx cy rot)) = 
     let f1x = cx+(len*ecc)*cos rot
@@ -188,10 +207,9 @@ particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (
         f rot cx cy x y  
           | not $ visible x y = 0
           | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
-               =  {-# SCC "gaussrn" #-} ifInside!(x,y) --(gaussRnn noise 0 $ im!(y,x,0)) + (gaussRnn noise 0 $ im!(y,x,1)) + (gaussRnn noise 0 $ im!(y,x,2))
-          | otherwise = 
-              {-# SCC "gaussw8rn" #-} ifoutside!(x,y) --(gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))+ (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1))  +(gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2))
-    in if nogoObj o then (o,-1e100) else (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (sum [ f rot cx cy x y  | 
+               =  ifInside!(x,y)
+          | otherwise =  ifoutside!(x,y)
+    in if nogoObj o then (o,-1e100) else (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f rot cx cy x y  | 
                    x <- xs, 
                    y <- ys]))
 
@@ -210,12 +228,12 @@ gaussR tau mu = lpdf . word8ToR
 --no-noise versions
 gaussW8nn :: R -> Word8 -> Word8 -> R
 gaussW8nn tau muw8 = lpdf . word8ToR  
-   where lpdf x = negate $ (((x-mu)^2)*tau)
+   where lpdf x = let y = x - mu in negate $ y*y
          mu = word8ToR  muw8
 gaussRnn :: R-> R -> Word8 -> R
 gaussRnn tau mu = lpdf . word8ToR  
    where lpdf :: R -> R
-         lpdf x =  negate $ (((x-mu)^2)*tau)
+         lpdf x = let y = x - mu in negate $ y*y
 
 
 word8ToR :: Word8 -> Double
@@ -273,7 +291,7 @@ main = do
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp bgIm fvid 1 6000 $ initObj
+         track sp bgIm fvid 0 5999 $ initObj
      
      return () 
 
