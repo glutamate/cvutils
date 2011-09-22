@@ -21,11 +21,17 @@ import Data.Maybe
 import Control.Applicative
 import Data.Ord
 
+import Data.IORef
+import System.IO.Unsafe
+
 type R = Double
 
 type Pos = (R,R)
 type Image = UArray (Int, Int, Int) Word8
 type MImage = IOUArray (Int, Int, Int) Word8
+
+bgImRef :: IORef Image
+bgImRef = unsafePerformIO $ newIORef undefined
 
 data Obj = 
   Obj {vellen :: !R,
@@ -38,15 +44,20 @@ data Obj =
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
-sdv = 2
-sdvrot = 0.1
+sdv = 0.5
+sdvrot = 0.2
 sddiv = 2
+
+hiddenflat = 5
+
+nparticles = 1000
+
 evolve :: Obj -> Sampler (Obj,Obj)
 evolve o@(Obj vlen vrot x y rot) = do
         nvlen <- gaussD vlen sdv
         nvrot <- gaussD vrot sdvrot
         nrot <- gaussD rot sdvrot
-        let no = Obj nvlen nvrot (x+nvlen*cos nvrot) (y+nvlen*sin nvrot) (rot+nrot)
+        let no = Obj nvlen nvrot (x+nvlen*cos nvrot) (y+nvlen*sin nvrot) nrot
         if nogoObj no 
            then evolve o 
            else return $ (o,no)
@@ -105,23 +116,25 @@ nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo
 
 
 prevprior :: Obj -> (Obj -> R)
-prevprior (Obj vlen vrot _ _ _) 
-      (Obj nvlen nvrot _ _ _) 
+prevprior (Obj vlen vrot _ _ rot) 
+      (Obj nvlen nvrot _ _ nrot) 
         =   PDF.gaussD vlen (sdv/sddiv) nvlen -- "heavy tailed proposals"
           + PDF.gaussD vrot (sdvrot/sddiv) nvrot
+          + PDF.gaussD rot (sdvrot/sddiv) nrot
 
 fileroot = reverse . takeWhile (/='/') . reverse . takeWhile (/='.')
 
-track :: StaticParams -> Image -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
-track sp bgIm vidfnm startfrm nframes obj0 = do
+track :: StaticParams -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
+track sp vidfnm startfrm nframes obj0 = do
   let outFnm = fileroot vidfnm ++ ".pos"
   h<- lift $ openFile outFnm WriteMode 
-  res <- go h bgIm (replicate nparticles obj0) [startfrm..startfrm+nframes-1] 
+  res <- go h (replicate nparticles obj0) [startfrm..startfrm+nframes-1] 
   lift $ hClose h
   return res
    where
-    go _ bgIm objs [] = return []
-    go h bgIm objs (i:is) = do
+    go _ objs [] = return []
+    go h objs (i:is) = do
+           bgIm <- lift $ readIORef bgImRef
            lift $ putStrLn $"~/cvutils/extract "++vidfnm++" "++show i 
            lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
            frame <- lift $ readImage "extract.png"
@@ -129,8 +142,8 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            --lift $ print2  "pixel1Red = " (frame!(0,0,0))
            let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame diffObjs)
            let anyInvisible = any objCentreInvisible $ map fst wparticles
-           let npart = if anyInvisible then 10*nparticles else nparticles
-           let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/80)) wparticles else wparticles
+           let npart = if anyInvisible then 20*nparticles else nparticles
+           let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/hiddenflat)) wparticles else wparticles
 
            let smws = sumWeights wparticles'
            let cummSmws = cummWeightedSamples wparticles'
@@ -157,7 +170,10 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show i++".png") markedIm
-           rest <- go h bgIm nextObjs is
+             lift $ updateBgIm frame mobj
+             bgIm2 <- lift $ readIORef bgImRef
+             lift $ writeImage ("bgtrack"++show i++".png") bgIm2
+           rest <- go h nextObjs is
            return $ mobj:rest
           
 print2 x y = putStrLn $ x ++show y
@@ -175,7 +191,7 @@ dropLosers ws =
   in sortBy (comparing snd) $ filter p ws
 
 subtr x y = y - x
-nparticles = 1000
+
 
 maxOn f xs = ceiling $ foldl1' max $ map f xs
 minOn f xs = floor $ foldl1' min $ map f xs
@@ -275,6 +291,20 @@ markObjsOnImage objs im = do
 
     freeze (mutIm::MImage)
     
+--updateBgIm :: Image -> 
+updateBgIm frame (Obj _ _ cx cy _) = do
+    im <- readIORef bgImRef
+    mutIm <- thaw im
+    ((loy,lox,_),(hiy,hix,_)) <- getBounds mutIm
+    forM_ [(y,x,c) | x<- [lox..hix], 
+                     y<- [loy..hiy],
+                     c<- [0..2], 
+                     dist cx cy x y > 30] $ \ix-> do
+      now <- readArray mutIm ix
+      writeArray mutIm ix $ (now `div` 2)  + ((frame!ix) `div` 2)
+    newbg <- freeze (mutIm::MImage)
+    writeIORef bgImRef newbg
+
 
 
          
@@ -291,6 +321,7 @@ main = do
      bgnm : fvid : (read -> x) : (read -> y) : (read -> rot) :_ <- getArgs
      --system $ "~/cvutils/extract "++fvid++" 1"
      bgIm <-readImage bgnm
+     writeIORef bgImRef bgIm
      --frame0 <-readImage "extract.png"
      {-marked <- markObjsOnImage [Obj (x,y) 0, 
                                 Obj (x+1,y) 0, 
@@ -302,11 +333,11 @@ main = do
          sp = (SP 218 6 0.9)
 --         rot = negate (pi/7)
          --initialsV = fromList [x,y,218, 6, rot, 0.9]
-         initObj =  (Obj 0 0 x y rot) 
+         initObj =  (Obj 1 rot x y rot) 
      --ellim <- markEllipse sp initObj frame0
      --writeImage "markell.png" ellim
-     print $ nogoPrior (Obj 0 0 992 650 rot)
-     print $ nogoPrior (Obj 0 0 997 650 rot)
+     print $ nogoPrior (Obj 0 rot 992 650 rot)
+     print $ nogoPrior (Obj 0 rot 997 650 rot)
      print $ visible 994 650
      print $ visible 1000 650
 
@@ -315,7 +346,7 @@ main = do
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp bgIm fvid 3200 1000 $ initObj
+         track sp fvid 3200 1000 $ initObj
      
      return () 
 

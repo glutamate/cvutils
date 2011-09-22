@@ -1,6 +1,7 @@
 #include <cv.h>
 #include <stdio.h>
 #include <highgui.h>
+#include <sys/time.h>
 
 int getopt(char c, int defval);
 
@@ -11,9 +12,10 @@ int main(int argc,char *argv[])
 {
   gargc = argc;
   gargv = argv;
-
+  FILE *tsfile;
+  char tsfilenm[80];  
   int c;
-
+  timeval tim;
   int stopit = 0;
 
   IplImage* color_img;
@@ -46,6 +48,9 @@ int main(int argc,char *argv[])
 
   for(;;) {
     sprintf(vidnm, "out%d.avi",vidcount);
+    // open time stamp file
+    sprintf(tsfilenm, "out%d.ts",vidcount);
+    tsfile = fopen(tsfilenm,"w+");
     vid_write= cvCreateVideoWriter(vidnm,
 				   //CV_FOURCC('M','J','P','G'),
 				   CV_FOURCC('D','I','V','X'),
@@ -64,12 +69,20 @@ int main(int argc,char *argv[])
 	break; // if ESC, break and quit
       }
       cvWriteFrame( vid_write, color_img);
+      
+      gettimeofday(&tim, NULL);
+
+
+      fprintf(tsfile,"(%d,%ld, %ld)\n",frcount, tim.tv_sec, tim.tv_usec);
     }
     /* clean up */
+   
 
     cvReleaseVideoWriter( &vid_write);
     if(stopit == 1) break;
     vidcount++;
+    //close ts file
+    fclose(tsfile);
   }
   cvReleaseCapture( &cv_cap );
   cvDestroyWindow("Video");
