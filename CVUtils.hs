@@ -28,8 +28,7 @@ type Image = UArray (Int, Int, Int) Word8
 type MImage = IOUArray (Int, Int, Int) Word8
 
 data Obj = 
-  Obj {velx :: !R,
-       vely :: !R,
+  Obj {vellen :: !R,
        vrot :: !R,
        posx :: !R, 
        posy :: !R, 
@@ -39,15 +38,15 @@ data Obj =
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
-sdv = 10
-sdvrot = 0.3
-sddiv = 4
+sdv = 2
+sdvrot = 0.1
+sddiv = 2
 evolve :: Obj -> Sampler (Obj,Obj)
-evolve o@(Obj vx vy vrot x y rot) = do
-        nvx <- gaussD vx sdv
-        nvy <- gaussD vy sdv
+evolve o@(Obj vlen vrot x y rot) = do
+        nvlen <- gaussD vlen sdv
         nvrot <- gaussD vrot sdvrot
-        let no = Obj nvx nvy nvrot (x+nvx) (y+nvy) (rot+nvrot)
+        nrot <- gaussD rot sdvrot
+        let no = Obj nvlen nvrot (x+nvlen*cos nvrot) (y+nvlen*sin nvrot) (rot+nrot)
         if nogoObj no 
            then evolve o 
            else return $ (o,no)
@@ -78,7 +77,7 @@ visible :: Int -> Int -> Bool
 visible x y  = not $ any (\sqr -> within sqr  x  y) invisible
 
 objCentreInvisible :: Obj -> Bool
-objCentreInvisible (Obj _ _ _ cx cy _) = not $ visible (round cx) (round cy)
+objCentreInvisible (Obj _ _ cx cy _) = not $ visible (round cx) (round cy)
 
 nogo::  [Square]
 nogo = 
@@ -106,11 +105,10 @@ nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo
 
 
 prevprior :: Obj -> (Obj -> R)
-prevprior (Obj vx vy vrot _ _ _) 
-      (Obj nvx nvy nvrot _ _ _) 
-        =   PDF.gaussD vx (sdv/sddiv) nvx -- "heavy tailed proposals"
-          + PDF.gaussD vy (sdv/sddiv) nvy
-          + PDF.gaussD vrot (sdvrot/sddiv) nvy
+prevprior (Obj vlen vrot _ _ _) 
+      (Obj nvlen nvrot _ _ _) 
+        =   PDF.gaussD vlen (sdv/sddiv) nvlen -- "heavy tailed proposals"
+          + PDF.gaussD vrot (sdvrot/sddiv) nvrot
 
 fileroot = reverse . takeWhile (/='/') . reverse . takeWhile (/='.')
 
@@ -146,8 +144,7 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            --lift $ print $ map snd $ take 10 $ reverse $ cummSmws
 
            let mobj 
-                 = runStat (pure Obj <*> before meanF velx
-                                     <*> before meanF vely
+                 = runStat (pure Obj <*> before meanF vellen
                                      <*> before meanF vrot
                                      <*> before meanF posx
                                      <*> before meanF posy
@@ -217,7 +214,7 @@ particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (
                        | x <- xs, 
                          y <- ys]
  
-  pL (old,o@(Obj _ _ _ cx cy rot)) = 
+  pL (old,o@(Obj  _ _ cx cy rot)) = 
     let f1x = cx+(len*ecc)*cos rot
         f1y = cy+(len*ecc)*sin rot
         f2x = cx-(len*ecc)*cos rot
@@ -271,7 +268,7 @@ realToW8 =  round. (*256)
 markObjsOnImage :: [Obj] -> Image -> IO (Image)
 markObjsOnImage objs im = do
     mutIm <- thaw im
-    forM_ objs $ \(Obj _ _ _ cx cy _) -> do
+    forM_ objs $ \(Obj _ _ cx cy _) -> do
           writeArray mutIm (round cy, round cx, 2) 255
           writeArray mutIm (round cy, round cx, 0) 0
           writeArray mutIm (round cy, round cx, 1) 0
@@ -305,11 +302,11 @@ main = do
          sp = (SP 218 6 0.9)
 --         rot = negate (pi/7)
          --initialsV = fromList [x,y,218, 6, rot, 0.9]
-         initObj =  (Obj 0 0 0 x y rot) 
+         initObj =  (Obj 0 0 x y rot) 
      --ellim <- markEllipse sp initObj frame0
      --writeImage "markell.png" ellim
-     print $ nogoPrior (Obj 0 0 0 992 650 rot)
-     print $ nogoPrior (Obj 0 0 0 997 650 rot)
+     print $ nogoPrior (Obj 0 0 992 650 rot)
+     print $ nogoPrior (Obj 0 0 997 650 rot)
      print $ visible 994 650
      print $ visible 1000 650
 
@@ -351,7 +348,7 @@ posteriorV bgim im (cx,cy) v =
               else gaussW8 noise (bgim!(y,x,ch)) $ im!(y,x,ch)
 
 markEllipse :: StaticParams -> Obj -> Image -> IO (Image)
-markEllipse sp@(SP noise len ecc) (Obj _ _ _ px py rot) im = do
+markEllipse sp@(SP noise len ecc) (Obj _ _ px py rot) im = do
     mutIm <- thaw im
     
     let cx = round px
@@ -391,3 +388,6 @@ uniformLogPdf from to = \x-> if x>=from && x <=to
 
 --rm marked.png && track mixed.png ~/Dropbox/woodlice/wl0.avi '(956,641)' && eog marked.png
 --rm -f frame*.png && sudo cabal install --global && track mixed.png ~/Dropbox/woodlice/wl0.avi 956 641 '-0.448'
+
+
+--rm -f frame*.png && sudo cabal install --global && track mixed.png ~/Dropbox/woodlice/wl0.avi 1092 518 '-5.12'
