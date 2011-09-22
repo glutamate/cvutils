@@ -39,14 +39,18 @@ data Obj =
 track1 bgIm objs im = 
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
-sdv = 3
+sdv = 10
 sdvrot = 0.3
+sddiv = 4
 evolve :: Obj -> Sampler (Obj,Obj)
 evolve o@(Obj vx vy vrot x y rot) = do
         nvx <- gaussD vx sdv
         nvy <- gaussD vy sdv
         nvrot <- gaussD vrot sdvrot
-        return $ (o,Obj nvx nvy nvrot (x+nvx) (y+nvy) (rot+nvrot))
+        let no = Obj nvx nvy nvrot (x+nvx) (y+nvy) (rot+nvrot)
+        if nogoObj no 
+           then evolve o 
+           else return $ (o,no)
 
 type Square = (Pos,Pos)
 
@@ -58,8 +62,17 @@ within ((lox,loy), (hix,hiy)) ox oy
 
 invisible :: [((Int,Int),(Int,Int))]
 
-invisible = [ ((963,626), 
-               (999,663))]
+invisible = [((362,621),(355,654)),
+             ((442,649),(443,674)),
+             ((866,626),(870,658)),
+             ((995,628),(999,657)),
+             ((1149,629),(1167,658)),
+             ((1003,71),(1010,36)),
+             ((422,71),(417,42)),
+             ((157,162),(127,158))]
+
+--[ ((963,626), 
+--               (999,663))]
 
 visible :: Int -> Int -> Bool
 visible x y  = not $ any (\sqr -> within sqr  x  y) invisible
@@ -69,12 +82,17 @@ objCentreInvisible (Obj _ _ _ cx cy _) = not $ visible (round cx) (round cy)
 
 nogo::  [Square]
 nogo = 
-    [((1128,657.5),(1159.5,627.5)),
+    [((1128,657.5),(1162,627.5)),
      ((963.25,656),(997,626.5)),
      ((836.5,653.75),(866.75,624.5)),
      ((389.75,619.5),(359.75,648.75)),
      ((162.75,309),(132,278.5)),
-     ((158.5,191.25),(127.25,160.75)),((422,72.25),(450.75,40.5)),((757.5,72),(728.5,41.75)),((1002.75,70.5),(974.25,39.75)),((1191,194),(1221,222.75)),((1185,435.25),(1213.5,463.5))]
+     ((158.5,191.25),(127.25,160.75)),
+     ((422,72.25),(450.75,40.5)),
+     ((757.5,72),(728.5,41.75)),
+     ((1002.75,70.5),(974.25,39.75)),
+     ((1191,194),(1221,222.75)),
+     ((1185,435.25),(1213.5,463.5))]
 --  [ ((963,626), 
 --     (997,663))]
 
@@ -90,9 +108,9 @@ nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo
 prevprior :: Obj -> (Obj -> R)
 prevprior (Obj vx vy vrot _ _ _) 
       (Obj nvx nvy nvrot _ _ _) 
-        =   PDF.gaussD vx (sdv/2) nvx -- "heavy tailed proposals"
-          + PDF.gaussD vy (sdv/2) nvy
-          + PDF.gaussD vrot (sdvrot/2) nvy
+        =   PDF.gaussD vx (sdv/sddiv) nvx -- "heavy tailed proposals"
+          + PDF.gaussD vy (sdv/sddiv) nvy
+          + PDF.gaussD vrot (sdvrot/sddiv) nvy
 
 fileroot = reverse . takeWhile (/='/') . reverse . takeWhile (/='.')
 
@@ -110,11 +128,11 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
            frame <- lift $ readImage "extract.png"
            diffObjs <- sample $ mapM evolve objs
-           lift $ print2  "pixel1Red = " (frame!(0,0,0))
+           --lift $ print2  "pixel1Red = " (frame!(0,0,0))
            let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame diffObjs)
            let anyInvisible = any objCentreInvisible $ map fst wparticles
-           let npart = if anyInvisible then 20*nparticles else nparticles
-           let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/5)) wparticles else wparticles
+           let npart = if anyInvisible then 10*nparticles else nparticles
+           let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/80)) wparticles else wparticles
 
            let smws = sumWeights wparticles'
            let cummSmws = cummWeightedSamples wparticles'
@@ -138,7 +156,7 @@ track sp bgIm vidfnm startfrm nframes obj0 = do
            lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
-           when (i `rem` 20 == 0) $ do 
+           when (i `rem` 5 == 0) $ do 
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show i++".png") markedIm
@@ -160,7 +178,7 @@ dropLosers ws =
   in sortBy (comparing snd) $ filter p ws
 
 subtr x y = y - x
-nparticles = 500
+nparticles = 1000
 
 maxOn f xs = ceiling $ foldl1' max $ map f xs
 minOn f xs = floor $ foldl1' min $ map f xs
@@ -204,17 +222,26 @@ particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (
         f1y = cy+(len*ecc)*sin rot
         f2x = cx-(len*ecc)*cos rot
         f2y = cy-(len*ecc)*sin rot
-        f rot cx cy x y  
+        sqrlen = 4 * len* len
+        f x y  
           | not $ visible x y = 0
           | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
                =  ifInside!(x,y)
           | otherwise =  ifoutside!(x,y)
-    in if nogoObj o then (o,-1e100) else (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f rot cx cy x y  | 
+    in if nogoObj o then (o,-1e100) else (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f x y  | 
                    x <- xs, 
                    y <- ys]))
 
 dist :: R -> R -> Int ->Int -> R 
-dist  cx cy   x y  = sqrt((cx-(realToFrac x+0.5))^2+(cy-(realToFrac y+0.5))^2)
+dist  cx cy   x y  = let dx = cx-(realToFrac x+0.5)
+                         dy = cy-(realToFrac y+0.5)
+                      in sqrt(dx*dx + dy*dy)
+
+dist' :: R -> R -> Int ->Int -> R 
+dist'  cx cy   x y  = let dx = cx-(realToFrac x+0.5)
+                          dy = cy-(realToFrac y+0.5)
+                      in dx*dx + dy*dy
+
 
 gaussW8 :: R -> Word8 -> Word8 -> R
 gaussW8 tau muw8 = lpdf . word8ToR  
@@ -291,7 +318,7 @@ main = do
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp bgIm fvid 0 5999 $ initObj
+         track sp bgIm fvid 3200 1000 $ initObj
      
      return () 
 
