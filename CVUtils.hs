@@ -35,7 +35,7 @@ bgImRef = unsafePerformIO $ newIORef undefined
 
 data Obj = 
   Obj {vellen :: !R,
-       vrot :: !R,
+       sideDisp :: !R,
        posx :: !R, 
        posy :: !R, 
        rot :: !R  } deriving Show
@@ -45,19 +45,21 @@ track1 bgIm objs im =
    samplingImportanceResampling $ particleLike bgIm im objs -}
 
 sdv = 0.5
-sdvrot = 0.2
+sdrot = 0.2
 sddiv = 2
+sdSideDisp = 0.3
 
-hiddenflat = 5
+hiddenflat = 1
 
 nparticles = 1000
 
 evolve :: Obj -> Sampler (Obj,Obj)
-evolve o@(Obj vlen vrot x y rot) = do
+evolve o@(Obj vlen side x y rot) = do
         nvlen <- gaussD vlen sdv
-        nvrot <- gaussD vrot sdvrot
-        nrot <- gaussD rot sdvrot
-        let no = Obj nvlen nvrot (x+nvlen*cos nvrot) (y+nvlen*sin nvrot) nrot
+        nside <- gaussD 0 sdSideDisp
+        nrot <- gaussD rot sdrot
+        let no = Obj nvlen nside (x+nvlen*cos nrot+nside*cos(nrot-pi/2)) 
+                                 (y+nvlen*sin nrot+nside*sin(nrot-pi/2)) nrot
         if nogoObj no 
            then evolve o 
            else return $ (o,no)
@@ -116,11 +118,11 @@ nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo
 
 
 prevprior :: Obj -> (Obj -> R)
-prevprior (Obj vlen vrot _ _ rot) 
-      (Obj nvlen nvrot _ _ nrot) 
+prevprior (Obj vlen side x y rot) 
+      (Obj nvlen nside _ _ nrot) 
         =   PDF.gaussD vlen (sdv/sddiv) nvlen -- "heavy tailed proposals"
-          + PDF.gaussD vrot (sdvrot/sddiv) nvrot
-          + PDF.gaussD rot (sdvrot/sddiv) nrot
+          + PDF.gaussD rot (sdrot/sddiv) nrot
+          + PDF.gaussD 0 (sdSideDisp/sddiv) nside
 
 fileroot = reverse . takeWhile (/='/') . reverse . takeWhile (/='.')
 
@@ -158,7 +160,7 @@ track sp vidfnm startfrm nframes obj0 = do
 
            let mobj 
                  = runStat (pure Obj <*> before meanF vellen
-                                     <*> before meanF vrot
+                                     <*> before meanF sideDisp
                                      <*> before meanF posx
                                      <*> before meanF posy
                                      <*> before meanF rot)
@@ -171,8 +173,8 @@ track sp vidfnm startfrm nframes obj0 = do
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show i++".png") markedIm
              lift $ updateBgIm frame mobj
-             bgIm2 <- lift $ readIORef bgImRef
-             lift $ writeImage ("bgtrack"++show i++".png") bgIm2
+             --bgIm2 <- lift $ readIORef bgImRef
+             --lift $ writeImage ("bgtrack"++show i++".png") bgIm2
            rest <- go h nextObjs is
            return $ mobj:rest
           
