@@ -52,21 +52,23 @@ getTriangles (GLU.Triangulation tris) = map unTri tris where
     (GLU.Triangle (GLU.AnnotatedVertex (Vertex3 x1 y1 _) _) 
                   (GLU.AnnotatedVertex (Vertex3 x2 y2 _) _) 
                   (GLU.AnnotatedVertex (Vertex3 x3 y3 _) _)) 
-       = [fromList [realToFrac x1,realToFrac y1,0], 
-          fromList [realToFrac x2,realToFrac y2,0], 
-          fromList [realToFrac x3,realToFrac y3,0]]
+       = [fromList [realToFrac x1,realToFrac y1], 
+          fromList [realToFrac x2,realToFrac y2], 
+          fromList [realToFrac x3,realToFrac y3]]
 
 --http://frame3dd.svn.sourceforge.net/viewvc/frame3dd/trunk/src/microstran/vec3.c?view=markup
 cross a b = fromList [(a@>1)*(b@>2)-(a@>2)*(b@>1)
                      ,(a@>2)*(b@>0)-(a@>0)*(b@>2)
                      ,(a@>0)*(b@>1)-(a@>1)*(b@>0)]
 
+crossXY a b = fromList [(a@>0)*(b@>1)-(a@>1)*(b@>0)]
+
 --http://www.blackpawn.com/texts/pointinpoly/default.html
 
 sameSide :: (Vector Double,Vector Double,Vector Double,Vector Double) -> Bool
 sameSide(p1,p2, a,b) 
- = let cp1 = cross (b-a) (p1-a)
-       cp2 = cross (b-a) (p2-a)
+ = let cp1 = crossXY (b-a) (p1-a)
+       cp2 = crossXY (b-a) (p2-a)
     in cp1 `dot` cp2 >= 0 
 
 
