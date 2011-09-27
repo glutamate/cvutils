@@ -105,3 +105,8 @@ markBg im = do
     freeze (mutIm::MImage) 
 --    return im
 
+loadTriangles :: IO [[Vector Double]] 
+loadTriangles = do
+    (progName,args) <-  GLUT.getArgsAndInitialize
+    pts <- loadPoints
+    triangulateEdge pts

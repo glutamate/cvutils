@@ -30,7 +30,8 @@ import Edge
 bgImRef :: IORef Image
 bgImRef = unsafePerformIO $ newIORef undefined
 
-
+visibleMat :: IORef BitImage
+visibleMat = unsafePerformIO $ newIORef undefined
 
 sdv = 0.5
 sdrot = 0.2
@@ -68,6 +69,17 @@ invisible = [((362,621),(355,654)),
 
 visible :: Int -> Int -> Bool
 visible x y  = not $ any (\sqr -> within sqr  x  y) invisible
+
+mkVisibleMat :: IO ()
+mkVisibleMat = do
+    tris <- loadTriangles
+    let visIm = mkBitImage 1280 720 
+                 $ \x -> \y-> any (pointInTriangle (fromList [realToFrac x, 
+                                                              realToFrac y])) 
+                                  tris
+                              && visible x y
+    writeIORef visibleMat visIm
+    return ()
 
 objCentreInvisible :: Obj -> Bool
 objCentreInvisible (Obj _ _ cx cy _) = not $ visible (round cx) (round cy)
@@ -121,7 +133,8 @@ track sp vidfnm startfrm nframes obj0 = do
            frame <- lift $ readImage "extract.png"
            diffObjs <- sample $ mapM evolve objs
            --lift $ print2  "pixel1Red = " (frame!(0,0,0))
-           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame diffObjs)
+           vismat <- lift $ readIORef visibleMat
+           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame vismat diffObjs)
            let anyInvisible = any objCentreInvisible $ map fst wparticles
            let npart = if anyInvisible then 20*nparticles else nparticles
            let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/hiddenflat)) wparticles else wparticles
@@ -157,8 +170,8 @@ track sp vidfnm startfrm nframes obj0 = do
            rest <- go h nextObjs is
            return $ mobj:rest
 
-particleLike :: StaticParams -> Image -> Image -> [(Obj,Obj)] -> [(Obj,R)]
-particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (map pL objprs) where
+particleLike :: StaticParams -> Image -> Image -> BitImage -> [(Obj,Obj)] -> [(Obj,R)]
+particleLike sp@(SP noise len ecc) bgim im vismat objprs = (map pL objprs) where
   radiusi = 2* ceiling (len*ecc) + 2
   objs = map snd objprs
   xmin =minOn (posx) objs - radiusi 
@@ -194,7 +207,7 @@ particleLike sp@(SP noise len ecc) bgim im objprs = {-# SCC "particleLike" #-} (
         f2y = cy-(len*ecc)*sin rot
         sqrlen = 4 * len* len
         f x y  
-          | not $ visible x y = 0
+          | not $ readBitImage vismat x y  = 0
           | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
                =  ifInside!(x,y)
           | otherwise =  ifoutside!(x,y)
@@ -221,8 +234,9 @@ main = do
      --system $ "~/cvutils/extract "++fvid++" 1"
      bgIm <-readImage bgnm
      writeIORef bgImRef bgIm
-     marked <- markBg bgIm
-     writeImage "markbg.png" marked
+--     marked <- markBg bgIm
+--     writeImage "markbg.png" marked
+     mkVisibleMat
      --frame0 <-readImage "extract.png"
      {-marked <- markObjsOnImage [Obj (x,y) 0, 
                                 Obj (x+1,y) 0, 
