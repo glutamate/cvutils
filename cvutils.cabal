@@ -13,7 +13,8 @@ Library
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
                         gnewplot, hmatrix>=0.12.0.1, storablevector, Codec-Image-DevIL, 
-                        array, storable-tuple, probably>0.1, vector, baysig>0.0.1, OpenGL<2.4, GLUT
+                        array, storable-tuple, probably>0.1, vector, baysig>0.0.1, OpenGL<2.4, 
+                        GLUT, bitarray
 
 Executable mix 
 --   Hs-source-dirs:   prog
@@ -34,4 +35,5 @@ Executable track
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
                         gnewplot, hmatrix>=0.12.0.1, storablevector, Codec-Image-DevIL, 
-                        array, storable-tuple, probably>0.1, baysig>0.0.1,  OpenGL<2.4, vector, GLUT
+                        array, storable-tuple, probably>0.1, baysig>0.0.1,  OpenGL<2.4, vector, 
+                        GLUT, bitarray

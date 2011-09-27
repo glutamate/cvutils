@@ -61,21 +61,30 @@ cross a b = fromList [(a@>1)*(b@>2)-(a@>2)*(b@>1)
                      ,(a@>2)*(b@>0)-(a@>0)*(b@>2)
                      ,(a@>0)*(b@>1)-(a@>1)*(b@>0)]
 
-crossXY a b = fromList [(a@>0)*(b@>1)-(a@>1)*(b@>0)]
+crossZ x y = (x@>0)*(y@>1)-(x@>1)*(y@>0)
+
+crossZp a b p = ((b@>0)-(a@>0))*((p@>1)-(a@>1))-((b@>1)-(a@>1))*((p@>0)-(a@>0))
 
 --http://www.blackpawn.com/texts/pointinpoly/default.html
 
 sameSide :: (Vector Double,Vector Double,Vector Double,Vector Double) -> Bool
 sameSide(p1,p2, a,b) 
- = let cp1 = crossXY (b-a) (p1-a)
-       cp2 = crossXY (b-a) (p2-a)
-    in cp1 `dot` cp2 >= 0 
+ = let cp1 = crossZ (b-a) (p1-a)
+       cp2 = crossZ (b-a) (p2-a)
+    in cp1 * cp2 >= 0 
+
+sameSide' :: (Vector Double,Vector Double,Vector Double,Vector Double) -> Bool
+sameSide'(p1,p2, a,b) 
+ = let cp1 = crossZp a b p1
+       cp2 = crossZp a b p2
+    in cp1 * cp2 >= 0 
+
 
 
 pointInTriangle :: Vector Double -> [Vector Double] -> Bool
 pointInTriangle p [a,b,c]
-    = sameSide(p,a, b,c) && sameSide(p,b, a,c)
-        && sameSide(p,c, a,b) 
+    = sameSide'(p,a, b,c) && sameSide'(p,b, a,c)
+        && sameSide'(p,c, a,b) 
 
 
 markBg :: Image -> IO Image
@@ -83,16 +92,16 @@ markBg im = do
     (progName,args) <-  GLUT.getArgsAndInitialize
     pts <- loadPoints
     tris <- triangulateEdge pts
-    print tris
+ --   print tris
     print $ head tris
-    print $ cross (head tris!!0) (head tris!!1)
+    --print $ cross (head tris!!0) (head tris!!1)
 
-    print $ pointInTriangle (fromList [100,100,0]) $ head tris
+--    print $ pointInTriangle (fromList [100,100]) $ head tris
     mutIm <- thaw im
     ((loy,lox,_),(hiy,hix,_)) <- getBounds (mutIm::MImage)
     forM_ [(y,x,0) | x<- [lox..hix], 
                      y<- [loy..hiy]] $ \ix@(y,x,_)-> do
-      when (any (pointInTriangle (fromList [realToFrac x, realToFrac y,0])) tris) $ writeArray mutIm ix 255
+      when (any (pointInTriangle (fromList [realToFrac x, realToFrac y])) tris) $ writeArray mutIm ix 255
     freeze (mutIm::MImage) 
-
+--    return im
 

@@ -23,13 +23,20 @@ import Data.Ord
 
 import Data.IORef
 import System.IO.Unsafe
+import Data.BitArray 
 
 type R = Double
 
 type Pos = (R,R)
 type Image = UArray (Int, Int, Int) Word8
 type MImage = IOUArray (Int, Int, Int) Word8
+data BitImage = BitImage Int BitArray
 
+mkBitImage :: Int -> Int -> (Int -> Int -> Bool) -> BitImage
+mkBitImage hix hiy f = BitImage hiy $ bitArray (0,(hix-1)*(hiy-1)) [ (x*hiy+y, f x y) | x<- [0..hix-1], y<- [0..hiy-1]]
+
+readBitImage :: BitImage -> Int -> Int -> Bool
+readBitImage (BitImage hiy im) x y = unsafeLookupBit im (x*hiy+y)
 
 {-track1 :: Image -> [Obj] -> Image -> Sampler Obj
 track1 bgIm objs im = 
