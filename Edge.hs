@@ -45,7 +45,7 @@ triangulateEdge pts = do
             GLU.TessWindingPositive 0 (Normal3 0 0 0) noOpCombiner
             $ complexPolygon pts
 
-
+type Triangles = [[Vector Double]]
      
 getTriangles (GLU.Triangulation tris) = map unTri tris where
    unTri 
@@ -110,3 +110,16 @@ loadTriangles = do
     (progName,args) <-  GLUT.getArgsAndInitialize
     pts <- loadPoints
     triangulateEdge pts
+
+writeVisMat :: String -> BitImage -> Image -> IO ()
+writeVisMat nm vm im = do
+   mutIm <- thaw im
+   ((loy,lox,_),(hiy,hix,_)) <- getBounds (mutIm::MImage)
+   forM_ [(y,x,0) | x<- [lox..hix], 
+                     y<- [loy..hiy]] $ \ix@(y,x,_)-> do
+     when (not $ readBitImage vm x y) $ writeArray mutIm ix 255
+   
+
+   newIm <- freeze (mutIm::MImage)
+   writeImage nm newIm
+   return ()

@@ -33,7 +33,7 @@ type MImage = IOUArray (Int, Int, Int) Word8
 data BitImage = BitImage Int BitArray
 
 mkBitImage :: Int -> Int -> (Int -> Int -> Bool) -> BitImage
-mkBitImage hix hiy f = BitImage hiy $ bitArray (0,(hix-1)*(hiy-1)) [ (x*hiy+y, f x y) | x<- [0..hix-1], y<- [0..hiy-1]]
+mkBitImage hix hiy f = BitImage hiy $ bitArray (0,(hix)*(hiy)-1) [ (x*hiy+y, f x y) | x<- [0..hix-1], y<- [0..hiy-1]]
 
 readBitImage :: BitImage -> Int -> Int -> Bool
 readBitImage (BitImage hiy im) x y = unsafeLookupBit im (x*hiy+y)
@@ -55,8 +55,9 @@ within ((lox,loy), (hix,hiy)) ox oy
 data Obj = 
   Obj {vellen :: !R,
        sideDisp :: !R,
+       objlen:: !R,
        posx :: !R, 
-       posy :: !R, 
+       posy :: !R,       
        rot :: !R  } deriving Show
 
 fileroot = reverse . takeWhile (/='/') . reverse . takeWhile (/='.')
@@ -126,7 +127,7 @@ realToW8 =  round. (*256)
 markObjsOnImage :: [Obj] -> Image -> IO (Image)
 markObjsOnImage objs im = do
     mutIm <- thaw im
-    forM_ objs $ \(Obj _ _ cx cy _) -> do
+    forM_ objs $ \(Obj _ _ _ cx cy _) -> do
           writeArray mutIm (round cy, round cx, 2) 255
           writeArray mutIm (round cy, round cx, 0) 0
           writeArray mutIm (round cy, round cx, 1) 0
@@ -148,37 +149,8 @@ mkRed arr cx cy = do
 --                             cx, 2) 0
 
 
-
-posteriorV :: Image -> Image -> (Int, Int) -> Vector R -> R
-posteriorV bgim im (cx,cy) v = 
-   uniformLogPdf 0 100.0 len +
-   uniformLogPdf 0 1.0 ecc +
-   uniformLogPdf 0 10000.0 noise +
-   uniformLogPdf 0 1500.0 px +
-   uniformLogPdf 0 1500.0 py +
-   sum [ f x y chan | 
-                   x <- [ (cx::Int) -50.. cx +50],
-                   y <- [ cy -50.. cy +50], 
-                   chan <- [0..2]]
-
-  where px = v @> 0
-        py = v @> 1
-        noise = v @> 2
-        len = v@> 3
-        rot = v@> 4
-        ecc = v@> 5
-        f1x = px+(len*ecc)*cos rot
-        f1y = py+(len*ecc)*sin rot
-        f2x = px-(len*ecc)*cos rot
-        f2y = py-(len*ecc)*sin rot
-        f :: Int -> Int -> Int -> R
-        f x y ch 
-         = if dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len
-              then gaussR noise 0 $ im!(y,x,ch)
-              else gaussW8 noise (bgim!(y,x,ch)) $ im!(y,x,ch)
-
 markEllipse :: StaticParams -> Obj -> Image -> IO (Image)
-markEllipse sp@(SP noise len ecc) (Obj _ _ px py rot) im = do
+markEllipse sp@(SP noise _ ecc) (Obj _ _ len px py rot) im = do
     mutIm <- thaw im
     
     let cx = round px

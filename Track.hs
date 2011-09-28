@@ -33,24 +33,40 @@ bgImRef = unsafePerformIO $ newIORef undefined
 visibleMat :: IORef BitImage
 visibleMat = unsafePerformIO $ newIORef undefined
 
+nogoMat :: IORef BitImage
+nogoMat = unsafePerformIO $ newIORef undefined
+
+inNogoMat x y = unsafePerformIO $ do
+    nm <- readIORef nogoMat
+    return $ readBitImage nm x y 
+     
+
+triRef :: IORef Triangles
+triRef = unsafePerformIO $ newIORef undefined
+
+gloTris = unsafePerformIO $ readIORef triRef
+
 sdv = 0.5
 sdrot = 0.2
 sddiv = 2
+sdlen = 0.1
 sdSideDisp = 0.3
 
 hiddenflat = 1
 
 nparticles = 1000
 
-evolve :: Obj -> Sampler (Obj,Obj)
-evolve o@(Obj vlen side x y rot) = do
+evolve :: Int -> Obj -> Sampler (Obj,Obj)
+evolve retries o@(Obj vlen side len x y rot) = do
         nvlen <- gaussD vlen sdv
         nside <- gaussD 0 sdSideDisp
         nrot <- gaussD rot sdrot
-        let no = Obj nvlen nside (x+nvlen*cos nrot+nside*cos(nrot-pi/2)) 
+        nlen <- gaussD len sdlen
+        let no = Obj nvlen nside nlen
+                                 (x+nvlen*cos nrot+nside*cos(nrot-pi/2)) 
                                  (y+nvlen*sin nrot+nside*sin(nrot-pi/2)) nrot
-        if nogoObj no 
-           then evolve o 
+        if inNogoMat (round $ posx no) (round $ posy no) && retries > 0
+           then evolve (retries-1) o 
            else return $ (o,no)
 
 invisible :: [((Int,Int),(Int,Int))]
@@ -73,16 +89,22 @@ visible x y  = not $ any (\sqr -> within sqr  x  y) invisible
 mkVisibleMat :: IO ()
 mkVisibleMat = do
     tris <- loadTriangles
+    writeIORef triRef tris    
     let visIm = mkBitImage 1280 720 
                  $ \x -> \y-> any (pointInTriangle (fromList [realToFrac x, 
                                                               realToFrac y])) 
                                   tris
                               && visible x y
     writeIORef visibleMat visIm
+    let nogoIm = mkBitImage 1280 720 
+                 $ \x -> \y-> any (\sqr-> within sqr (realToFrac x) (realToFrac y)) nogo 
+                              || (not $ any (pointInTriangle (fromList [realToFrac x, realToFrac y])) tris)
+    writeIORef nogoMat nogoIm
     return ()
 
+
 objCentreInvisible :: Obj -> Bool
-objCentreInvisible (Obj _ _ cx cy _) = not $ visible (round cx) (round cy)
+objCentreInvisible (Obj _ _ _ cx cy _) = not $ visible (round cx) (round cy)
 
 
 nogo::  [Square]
@@ -106,16 +128,21 @@ nogoPrior o = sum $ map f nogo
           where  f sqr | within sqr (posx o) (posy o) = -1e100
                        | otherwise = 0
 
-nogoObj :: Obj -> Bool
-nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo
+{-nogoObj :: Obj -> Bool
+nogoObj o = any (\sqr-> within sqr (posx o) (posy o)) nogo 
+              || (not $ any (pointInTriangle (fromList [posx o, 
+                                                        posy o])) gloTris) -}
 
 
 prevprior :: Obj -> (Obj -> R)
-prevprior (Obj vlen side x y rot) 
-      (Obj nvlen nside _ _ nrot) 
+prevprior (Obj vlen side len x y rot) 
+      (Obj nvlen nside nlen _ _ nrot) 
         =   PDF.gaussD vlen (sdv/sddiv) nvlen -- "heavy tailed proposals"
           + PDF.gaussD rot (sdrot/sddiv) nrot
+          + PDF.gaussD len (sdlen/sddiv) nlen
           + PDF.gaussD 0 (sdSideDisp/sddiv) nside
+          + PDF.gaussD 6 1 nlen
+
 
 track :: StaticParams -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
 track sp vidfnm startfrm nframes obj0 = do
@@ -128,15 +155,16 @@ track sp vidfnm startfrm nframes obj0 = do
     go _ objs [] = return []
     go h objs (i:is) = do
            bgIm <- lift $ readIORef bgImRef
+           nogomat <- lift $ readIORef nogoMat
            lift $ putStrLn $"~/cvutils/extract "++vidfnm++" "++show i 
            lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
            frame <- lift $ readImage "extract.png"
-           diffObjs <- sample $ mapM evolve objs
+           diffObjs <- sample $ mapM (evolve 10) objs
            --lift $ print2  "pixel1Red = " (frame!(0,0,0))
            vismat <- lift $ readIORef visibleMat
-           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame vismat diffObjs)
+           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame vismat nogomat diffObjs)
            let anyInvisible = any objCentreInvisible $ map fst wparticles
-           let npart = if anyInvisible then 20*nparticles else nparticles
+           let npart = if anyInvisible then 5*nparticles else nparticles
            let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/hiddenflat)) wparticles else wparticles
 
            let smws = sumWeights wparticles'
@@ -153,6 +181,7 @@ track sp vidfnm startfrm nframes obj0 = do
            let mobj 
                  = runStat (pure Obj <*> before meanF vellen
                                      <*> before meanF sideDisp
+                                     <*> before meanF objlen
                                      <*> before meanF posx
                                      <*> before meanF posy
                                      <*> before meanF rot)
@@ -170,8 +199,8 @@ track sp vidfnm startfrm nframes obj0 = do
            rest <- go h nextObjs is
            return $ mobj:rest
 
-particleLike :: StaticParams -> Image -> Image -> BitImage -> [(Obj,Obj)] -> [(Obj,R)]
-particleLike sp@(SP noise len ecc) bgim im vismat objprs = (map pL objprs) where
+particleLike :: StaticParams -> Image -> Image -> BitImage -> BitImage ->[(Obj,Obj)] -> [(Obj,R)]
+particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = (map pL objprs) where
   radiusi = 2* ceiling (len*ecc) + 2
   objs = map snd objprs
   xmin =minOn (posx) objs - radiusi 
@@ -180,11 +209,13 @@ particleLike sp@(SP noise len ecc) bgim im vismat objprs = (map pL objprs) where
   ymax = maxOn posy objs+radiusi
   xs = [xmin.. xmax] -- calc region of interest from all objs
   ys = [ymin..ymax]
+--  cvec = fromList [20,25,30]
+
   ifInside, ifoutside, ifmixed ::UArray (Int,Int) R
   ifInside = array ((xmin,ymin),(xmax,ymax)) 
-                   [((x,y),(gaussRnn noise 0 $ im!(y,x,0)) 
-                           + (gaussRnn noise 0 $ im!(y,x,1)) 
-                           + (gaussRnn noise 0 $ im!(y,x,2)))
+                   [((x,y),(gaussRnn noise 0.07 $ im!(y,x,0)) 
+                           + (gaussRnn noise 0.09 $ im!(y,x,1)) 
+                           + (gaussRnn noise 0.12 $ im!(y,x,2)))
                        | x <- xs, 
                          y <- ys]
   ifoutside = array ((xmin,ymin),(xmax,ymax)) 
@@ -200,7 +231,7 @@ particleLike sp@(SP noise len ecc) bgim im vismat objprs = (map pL objprs) where
                        | x <- xs, 
                          y <- ys]
  
-  pL (old,o@(Obj  _ _ cx cy rot)) = 
+  pL (old,o@(Obj  _ _ len cx cy rot)) = 
     let f1x = cx+(len*ecc)*cos rot
         f1y = cy+(len*ecc)*sin rot
         f2x = cx-(len*ecc)*cos rot
@@ -211,11 +242,14 @@ particleLike sp@(SP noise len ecc) bgim im vismat objprs = (map pL objprs) where
           | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
                =  ifInside!(x,y)
           | otherwise =  ifoutside!(x,y)
-    in if nogoObj o then (o,-1e100) else (o, nogoPrior o + prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f x y  | 
+    in if readBitImage nogomat (round $ posx o) (round $ posy o) 
+          then (o,-1e100) 
+          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f x y  | 
                    x <- xs, 
                    y <- ys]))
 
-updateBgIm frame (Obj _ _ cx cy _) = do
+
+updateBgIm frame (Obj _ _ _ cx cy _) = do
     im <- readIORef bgImRef
     mutIm <- thaw im
     ((loy,lox,_),(hiy,hix,_)) <- getBounds mutIm
@@ -237,6 +271,8 @@ main = do
 --     marked <- markBg bgIm
 --     writeImage "markbg.png" marked
      mkVisibleMat
+     vm <- readIORef visibleMat
+     writeVisMat "vismat.png" vm bgIm
      --frame0 <-readImage "extract.png"
      {-marked <- markObjsOnImage [Obj (x,y) 0, 
                                 Obj (x+1,y) 0, 
@@ -248,20 +284,20 @@ main = do
          sp = (SP 218 6 0.9)
 --         rot = negate (pi/7)
          --initialsV = fromList [x,y,218, 6, rot, 0.9]
-         initObj =  (Obj 1 rot x y rot) 
+         initObj =  (Obj 1 rot 6 x y rot) 
      --ellim <- markEllipse sp initObj frame0
      --writeImage "markell.png" ellim
-     print $ nogoPrior (Obj 0 rot 992 650 rot)
-     print $ nogoPrior (Obj 0 rot 997 650 rot)
-     print $ visible 994 650
-     print $ visible 1000 650
+     --print $ nogoPrior (Obj 0 rot 992 650 rot)
+     --print $ nogoPrior (Obj 0 rot 997 650 rot)
+     ----print $ visible 994 650
+     --print $ visible 1000 650
 
      runRIO $ do
 --         iniampar <- sample $ initialAdaMet 500 1e-4 posterior initialsV
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp fvid 3200 1000 $ initObj
+         track sp fvid 3200 2799 $ initObj
      
      return () 
 
