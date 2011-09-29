@@ -20,6 +20,7 @@ import Data.List
 import Data.Maybe
 import Control.Applicative
 import Data.Ord
+import System.Directory
  
 import Data.IORef
 import System.IO.Unsafe
@@ -144,16 +145,16 @@ prevprior (Obj vlen side len x y rot)
           + PDF.gaussD 6 1 nlen
 
 
-track :: StaticParams -> String -> Int -> Int -> Obj -> StateT Seed IO [Obj]
+track :: StaticParams -> String -> Int -> Int -> Obj -> StateT Seed IO Obj
 track sp vidfnm startfrm nframes obj0 = do
   let outFnm = fileroot vidfnm ++ ".pos"
   h<- lift $ openFile outFnm WriteMode 
-  res <- go h (replicate nparticles obj0) [startfrm..startfrm+nframes-1] 
+  res <-  go h (replicate nparticles obj0) [startfrm..startfrm+nframes-1] obj0
   lift $ hClose h
   return res
    where
-    go _ objs [] = return []
-    go h objs (i:is) = do
+    go _ objs [] o = return o
+    go h objs (i:is) _ = do
            bgIm <- lift $ readIORef bgImRef
            nogomat <- lift $ readIORef nogoMat
            lift $ putStrLn $"~/cvutils/extract "++vidfnm++" "++show i 
@@ -196,8 +197,8 @@ track sp vidfnm startfrm nframes obj0 = do
              lift $ updateBgIm frame mobj
              --bgIm2 <- lift $ readIORef bgImRef
              --lift $ writeImage ("bgtrack"++show i++".png") bgIm2
-           rest <- go h nextObjs is
-           return $ mobj:rest
+           go h nextObjs is mobj
+           --return () -- $ mobj:rest
 
 particleLike :: StaticParams -> Image -> Image -> BitImage -> BitImage ->[(Obj,Obj)] -> [(Obj,R)]
 particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = (map pL objprs) where
@@ -271,6 +272,8 @@ main = do
 --     marked <- markBg bgIm
 --     writeImage "markbg.png" marked
      mkVisibleMat
+     print fvid
+     error "foo"
      vm <- readIORef visibleMat
      writeVisMat "vismat.png" vm bgIm
      --frame0 <-readImage "extract.png"
@@ -297,9 +300,24 @@ main = do
 --         AMPar v _ _ _ <- runAndDiscard 5000 (show . ampPar) iniampar $ adaMet False posterior
 --         lift $ print v
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
-         track sp fvid 3200 2799 $ initObj
+         if "%d" `isInfixOf` fvid 
+            then trackMany sp fvid initObj 
+            else track sp fvid 3200 2799 $ initObj
      
      return () 
+
+trackMany sp fvid initObj = go 0 initObj where
+  go n obj = do
+     let fnm = takeWhile (/='%') fvid ++ show n ++ ".avi"
+     exists <- lift $ doesFileExist fnm
+     if exists then reallyGo n fnm obj else return obj
+  reallyGo n fnm obj0= do
+     lift $ system $ "~/cvutils/extract "++fnm++" "++show i ++">tempout"
+     lns <- lift $ lines `fmap` readFile "tempout"
+     let nframes = read $ tail $ dropWhile (/='=') $ head $ filter ("total frames=" `isPrefixOf`) lns
+     objNext <- track sp fnm 0 (nframes-2) $ obj0
+     go (n+1) objNext
+     
 
 -- initial on wl0: (956,641)
 
