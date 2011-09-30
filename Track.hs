@@ -79,7 +79,8 @@ invisible = [((362,621),(355,654)),
              ((1149,629),(1167,658)),
              ((1003,71),(1010,36)),
              ((422,71),(417,42)),
-             ((157,162),(127,158))]
+             ((157,162),(127,158)),
+             ((1178,469),(1187,501))]
 
 --[ ((963,626), 
 --               (999,663))]
@@ -145,8 +146,8 @@ prevprior (Obj vlen side len x y rot)
           + PDF.gaussD 6 1 nlen
 
 
-track :: StaticParams -> String -> Int -> Int -> Obj -> StateT Seed IO Obj
-track sp vidfnm startfrm nframes obj0 = do
+track :: StaticParams -> String -> Int -> Int -> Int -> Obj -> StateT Seed IO Obj
+track sp vidfnm startfrm nframes frameOffset obj0 = do
   let outFnm = fileroot vidfnm ++ ".pos"
   h<- lift $ openFile outFnm WriteMode 
   res <-  go h (replicate nparticles obj0) [startfrm..startfrm+nframes-1] obj0
@@ -190,10 +191,10 @@ track sp vidfnm startfrm nframes obj0 = do
            lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
-           when (i `rem` 5 == 0) $ do 
+           when (i `rem` 20 == 0) $ do 
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
-             lift $ writeImage ("frame"++show i++".png") markedIm
+             lift $ writeImage ("frame"++show (i+frameOffset)++".png") markedIm
              lift $ updateBgIm frame mobj
              --bgIm2 <- lift $ readIORef bgImRef
              --lift $ writeImage ("bgtrack"++show i++".png") bgIm2
@@ -272,8 +273,7 @@ main = do
 --     marked <- markBg bgIm
 --     writeImage "markbg.png" marked
      mkVisibleMat
-     print fvid
-     error "foo"
+     print fvid    
      vm <- readIORef visibleMat
      writeVisMat "vismat.png" vm bgIm
      --frame0 <-readImage "extract.png"
@@ -302,21 +302,24 @@ main = do
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
          if "%d" `isInfixOf` fvid 
             then trackMany sp fvid initObj 
-            else track sp fvid 3200 2799 $ initObj
+            else track sp fvid 3200 2799 0 $ initObj
      
      return () 
 
-trackMany sp fvid initObj = go 0 initObj where
-  go n obj = do
+putS s  = lift . putStrLn $ s
+
+trackMany sp fvid initObj = go 0 0 initObj where
+  go n frOff obj = do
      let fnm = takeWhile (/='%') fvid ++ show n ++ ".avi"
+     putS $ "looking for "++fnm
      exists <- lift $ doesFileExist fnm
-     if exists then reallyGo n fnm obj else return obj
-  reallyGo n fnm obj0= do
+     if exists then reallyGo n fnm frOff obj else putS "all done" >> return obj
+  reallyGo n fnm frOff obj0= do
      lift $ system $ "~/cvutils/extract "++fnm++" "++show i ++">tempout"
      lns <- lift $ lines `fmap` readFile "tempout"
      let nframes = read $ tail $ dropWhile (/='=') $ head $ filter ("total frames=" `isPrefixOf`) lns
-     objNext <- track sp fnm 0 (nframes-2) $ obj0
-     go (n+1) objNext
+     objNext <- track sp fnm 0 (nframes-2) frOff $ obj0
+     go (n+1) (frOff+nframes-2) objNext
      
 
 -- initial on wl0: (956,641)
