@@ -41,15 +41,16 @@ inNogoMat x y = unsafePerformIO $ do
     nm <- readIORef nogoMat
     return $ readBitImage nm x y 
      
-
+ 
 triRef :: IORef Triangles
 triRef = unsafePerformIO $ newIORef undefined
 
 gloTris = unsafePerformIO $ readIORef triRef
 
 sdv = 0.5
-sdrot = 0.2
+sdrot = 0.4
 sddiv = 2
+sddivRot = 4
 sdlen = 0.1
 sdSideDisp = 0.3
 
@@ -59,10 +60,10 @@ nparticles = 1000
 
 evolve :: Int -> Obj -> Sampler (Obj,Obj)
 evolve retries o@(Obj vlen side len x y rot) = do
-        nvlen <- gaussD vlen sdv
-        nside <- gaussD 0 sdSideDisp
-        nrot <- gaussD rot sdrot
-        nlen <- gaussD len sdlen
+        nvlen <- gauss vlen sdv
+        nside <- gauss 0 sdSideDisp
+        nrot <- gauss rot sdrot
+        nlen <- gauss len sdlen
         let no = Obj nvlen nside nlen
                                  (x+nvlen*cos nrot+nside*cos(nrot-pi/2)) 
                                  (y+nvlen*sin nrot+nside*sin(nrot-pi/2)) nrot
@@ -140,7 +141,7 @@ prevprior :: Obj -> (Obj -> R)
 prevprior (Obj vlen side len x y rot) 
       (Obj nvlen nside nlen _ _ nrot) 
         =   PDF.gaussD vlen (sdv/sddiv) nvlen -- "heavy tailed proposals"
-          + PDF.gaussD rot (sdrot/sddiv) nrot
+          + PDF.gaussD rot (sdrot/sddivRot) nrot
           + PDF.gaussD len (sdlen/sddiv) nlen
           + PDF.gaussD 0 (sdSideDisp/sddiv) nside
           + PDF.gaussD 6 1 nlen
@@ -172,8 +173,8 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            let smws = sumWeights wparticles'
            let cummSmws = cummWeightedSamples wparticles'
            lift $ print2 "npart=" npart          
-           lift $ print2 "winners= " (map snd wparticles')
-           lift $ hFlush stdout
+           --lift $ print2 "winners= " (map snd wparticles')
+           --lift $ hFlush stdout
            nextObjs <- sample $ sequence 
                               $ replicate npart
                               $ do u <- unitSample
@@ -188,7 +189,7 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
                                      <*> before meanF posy
                                      <*> before meanF rot)
                               nextObjs
-           lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
+           --lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
            when (i `rem` 20 == 0) $ do 
@@ -202,7 +203,7 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            --return () -- $ mobj:rest
 
 particleLike :: StaticParams -> Image -> Image -> BitImage -> BitImage ->[(Obj,Obj)] -> [(Obj,R)]
-particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = (map pL objprs) where
+particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = map pL objprs where
   radiusi = 2* ceiling (len*ecc) + 2
   objs = map snd objprs
   xmin =minOn (posx) objs - radiusi 
@@ -211,25 +212,26 @@ particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = (map pL objpr
   ymax = maxOn posy objs+radiusi
   xs = [xmin.. xmax] -- calc region of interest from all objs
   ys = [ymin..ymax]
+  xys = [(x,y) | x <- xs, y <- ys]
 --  cvec = fromList [20,25,30]
 
   ifInside, ifoutside, ifmixed ::UArray (Int,Int) R
-  ifInside = array ((xmin,ymin),(xmax,ymax)) 
-                   [((x,y),(gaussRnn noise 0.07 $ im!(y,x,0)) 
+  ifInside = listArray ((xmin,ymin),(xmax,ymax)) 
+                   [((gaussRnn noise 0.07 $ im!(y,x,0)) 
                            + (gaussRnn noise 0.09 $ im!(y,x,1)) 
                            + (gaussRnn noise 0.12 $ im!(y,x,2)))
                        | x <- xs, 
                          y <- ys]
-  ifoutside = array ((xmin,ymin),(xmax,ymax)) 
-                    [ ((x,y),(gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))
-                             + (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
-                             + (gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2)))
+  ifoutside = listArray ((xmin,ymin),(xmax,ymax)) 
+                    [ ((gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))
+                           + (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
+                           + (gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2)))
                        | x <- xs, 
                          y <- ys]
-  ifmixed   = array ((xmin,ymin),(xmax,ymax)) 
-                    [ ((x,y),(gaussW8nn noise (bgim!(y,x,0) `div` 2) $ im!(y,x,0))
-                             + (gaussW8nn noise (bgim!(y,x,1) `div` 2) $ im!(y,x,1)) 
-                             + (gaussW8nn noise (bgim!(y,x,2) `div` 2) $ im!(y,x,2)))
+  ifmixed   = listArray ((xmin,ymin),(xmax,ymax)) 
+                    [ ((gaussW8nn noise (bgim!(y,x,0) `div` 2) $ im!(y,x,0))
+                           + (gaussW8nn noise (bgim!(y,x,1) `div` 2) $ im!(y,x,1)) 
+                           + (gaussW8nn noise (bgim!(y,x,2) `div` 2) $ im!(y,x,2)))
                        | x <- xs, 
                          y <- ys]
  
@@ -239,16 +241,16 @@ particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = (map pL objpr
         f2x = cx-(len*ecc)*cos rot
         f2y = cy-(len*ecc)*sin rot
         sqrlen = 4 * len* len
-        f x y  
+        f (x, y)  
           | not $ readBitImage vismat x y  = 0
           | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
                =  ifInside!(x,y)
           | otherwise =  ifoutside!(x,y)
     in if readBitImage nogomat (round $ posx o) (round $ posy o) 
           then (o,-1e100) 
-          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f x y  | 
-                   x <- xs, 
-                   y <- ys]))
+          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f (xy)  | xy <- xys]))
+                   --x <- xs, 
+                   --y <- ys]))
 
 
 updateBgIm frame (Obj _ _ _ cx cy _) = do
@@ -284,7 +286,7 @@ main = do
      writeImage "marked.png" marked -}
      let --posterior = posteriorV bgIm frame0 (round x,round y)
          --postAndV v = (posteriorV bgIm frame0 (round x,round y) $ fromList v, v)
-         sp = (SP 218 6 0.9)
+         sp = (SP 218 5 0.9)
 --         rot = negate (pi/7)
          --initialsV = fromList [x,y,218, 6, rot, 0.9]
          initObj =  (Obj 1 rot 6 x y rot) 
@@ -302,7 +304,7 @@ main = do
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
          if "%d" `isInfixOf` fvid 
             then trackMany sp fvid initObj 
-            else track sp fvid 3200 2799 0 $ initObj
+            else track sp fvid 2000 2000 0 $ initObj
      
      return () 
 

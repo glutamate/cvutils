@@ -27,11 +27,11 @@ import Graphics.Rendering.OpenGL
 import CVUtils
 import qualified Graphics.UI.GLUT as GLUT
 
-loadPoints :: IO [(Double,Double)]
+loadPoints :: IO [(R,R)]
 loadPoints = fmap read $ readFile "edge.dat"
 
 
-complexPolygon :: [(Double,Double)] -> GLU.ComplexPolygon GLfloat
+complexPolygon :: [(R,R)] -> GLU.ComplexPolygon GLfloat
 complexPolygon points
   = let p2v (x,y) = Vertex3 (realToFrac x) (realToFrac y) 0
     in GLU.ComplexPolygon 
@@ -39,13 +39,13 @@ complexPolygon points
 
 noOpCombiner _newVertex _weightedProperties = 0.0 ::GLfloat
 
-triangulateEdge :: [(Double,Double)] -> IO [[Vector Double]]
+triangulateEdge :: [(R,R)] -> IO [[Vector R]]
 triangulateEdge pts = do
    fmap getTriangles $ GLU.triangulate
             GLU.TessWindingPositive 0 (Normal3 0 0 0) noOpCombiner
             $ complexPolygon pts
 
-type Triangles = [[Vector Double]]
+type Triangles = [[Vector R]]
      
 getTriangles (GLU.Triangulation tris) = map unTri tris where
    unTri 
@@ -67,13 +67,13 @@ crossZp a b p = ((b@>0)-(a@>0))*((p@>1)-(a@>1))-((b@>1)-(a@>1))*((p@>0)-(a@>0))
 
 --http://www.blackpawn.com/texts/pointinpoly/default.html
 
-sameSide :: (Vector Double,Vector Double,Vector Double,Vector Double) -> Bool
+sameSide :: (Vector R,Vector R,Vector R,Vector R) -> Bool
 sameSide(p1,p2, a,b) 
  = let cp1 = crossZ (b-a) (p1-a)
        cp2 = crossZ (b-a) (p2-a)
     in cp1 * cp2 >= 0 
 
-sameSide' :: (Vector Double,Vector Double,Vector Double,Vector Double) -> Bool
+sameSide' :: (Vector R,Vector R,Vector R,Vector R) -> Bool
 sameSide'(p1,p2, a,b) 
  = let cp1 = crossZp a b p1
        cp2 = crossZp a b p2
@@ -81,7 +81,7 @@ sameSide'(p1,p2, a,b)
 
 
 
-pointInTriangle :: Vector Double -> [Vector Double] -> Bool
+pointInTriangle :: Vector R -> [Vector R] -> Bool
 pointInTriangle p [a,b,c]
     = sameSide'(p,a, b,c) && sameSide'(p,b, a,c)
         && sameSide'(p,c, a,b) 
@@ -105,7 +105,7 @@ markBg im = do
     freeze (mutIm::MImage) 
 --    return im
 
-loadTriangles :: IO [[Vector Double]] 
+loadTriangles :: IO [[Vector R]] 
 loadTriangles = do
     (progName,args) <-  GLUT.getArgsAndInitialize
     pts <- loadPoints

@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, MagicHash #-}
 
 module CVUtils where
 
@@ -24,6 +24,9 @@ import Data.Ord
 import Data.IORef
 import System.IO.Unsafe
 import Data.BitArray 
+
+import GHC.Exts
+import GHC.Word 
 
 type R = Double
 
@@ -67,10 +70,10 @@ print2 x y = putStrLn $ x ++show y
 
 smallest ws = foldl1' (min) $ map snd ws
 largest ws = map snd $ sortBy (comparing snd) ws
-sumWeights ws = sum $ map (exp . (subtr (smallest ws)) . snd) ws
+sumWeights ws = sum $ map ( (subtr (smallest ws)) . snd) ws
 cummWeightedSamples ws= 
    let least = smallest ws
-   in scanl (\(_,csum) (x,w) -> (x,csum+exp (w-least))) (undefined,0) ws
+   in scanl (\(_,csum) (x,w) -> (x,csum+ (w-least))) (fst $ head ws ,0) ws
 
 dropLosers ws = 
   let topW = foldl1' (max) $ map snd ws
@@ -119,10 +122,11 @@ gaussRnn tau mu = lpdf . word8ToR
          lpdf x = let y = x - mu in negate $ y*y
 
 
-word8ToR :: Word8 -> Double
-word8ToR = (/256) . realToFrac 
-realToW8 :: Double -> Word8
-realToW8 =  round. (*256) 
+word8ToR :: Word8 -> R
+--word8ToR (W8# whash) = (/256) $ F# $ int2Float# $ word2Int# whash
+word8ToR (W8# whash) = (/256) $ D# $ int2Double# $ word2Int# whash
+realToW8 :: R -> Word8
+realToW8 =  round . (*256) 
 
 markObjsOnImage :: [Obj] -> Image -> IO (Image)
 markObjsOnImage objs im = do
