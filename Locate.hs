@@ -5,6 +5,7 @@ module Main where
 import Codec.Image.DevIL
 import Data.Array.Unboxed
 import Math.Probably.MCMC
+import Math.Probably.RandIO
 import Math.Probably.Sampler
 import Math.Probably.FoldingStats
 import Control.Monad.State.Strict 
@@ -12,7 +13,7 @@ import System.Cmd
 import System.Environment
 import Data.Array.IO
 import System.IO
-import Baysig.Estimate.RTS
+
 import Data.Array.Unboxed
 import Numeric.LinearAlgebra hiding (find)
 import qualified Math.Probably.PDF as PDF

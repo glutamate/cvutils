@@ -6,13 +6,14 @@ import Codec.Image.DevIL
 import Data.Array.Unboxed
 import Math.Probably.MCMC
 import Math.Probably.Sampler
+import Math.Probably.RandIO
 import Math.Probably.FoldingStats
 import Control.Monad.State.Strict 
 import System.Cmd
 import System.Environment
 import Data.Array.IO
 import System.IO
-import Baysig.Estimate.RTS
+
 import Data.Array.Unboxed
 import Numeric.LinearAlgebra hiding (find)
 import qualified Math.Probably.PDF as PDF
@@ -60,10 +61,10 @@ nparticles = 1000
 
 evolve :: Int -> Obj -> Sampler (Obj,Obj)
 evolve retries o@(Obj vlen side len x y rot) = do
-        nvlen <- gauss vlen sdv
-        nside <- gauss 0 sdSideDisp
-        nrot <- gauss rot sdrot
-        nlen <- gauss len sdlen
+        nvlen <- gaussD vlen sdv
+        nside <- gaussD 0 sdSideDisp
+        nrot <- gaussD rot sdrot
+        nlen <- gaussD len sdlen
         let no = Obj nvlen nside nlen
                                  (x+nvlen*cos nrot+nside*cos(nrot-pi/2)) 
                                  (y+nvlen*sin nrot+nside*sin(nrot-pi/2)) nrot
@@ -176,7 +177,7 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            lift $ print2 "npart=" npart          
            --lift $ print2 "winners= " (map snd wparticles')
            --lift $ hFlush stdout
-           nextObjs <- sample $ sequence 
+           nextObjs <- {-# SCC "resample" #-} sample $ sequence 
                               $ replicate npart
                               $ do u <- unitSample
                                    return . fst . fromJust $ find ((>=u*smws) . snd) cummSmws

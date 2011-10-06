@@ -29,24 +29,24 @@ Executable mix
 Executable track
 --   Hs-source-dirs:   prog
    Main-Is:          Track.hs
-   ghc-options:      -O2 -threaded
+   ghc-options:      -O3 -threaded -rtsopts
 --   other-modules:    EvalM
    ghc-prof-options:    -auto-all
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
                         gnewplot, hmatrix, storablevector, Codec-Image-DevIL, 
-                        array, storable-tuple, probably>0.1, baysig>0.0.1,  OpenGL<2.4, vector, 
+                        array, storable-tuple, probably>0.1, OpenGL<2.4, vector, 
                         GLUT, bitarray
 
 
 Executable locatewl
 --   Hs-source-dirs:   prog
    Main-Is:          Locate.hs
-   ghc-options:      -O2 -threaded
+   ghc-options:      -O3 -threaded -rtsopts
 --   other-modules:    EvalM
    ghc-prof-options:    -auto-all
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
                         gnewplot, hmatrix, storablevector, Codec-Image-DevIL, 
-                        array, storable-tuple, probably>0.1, baysig>0.0.1,  OpenGL<2.4, vector, 
+                        array, storable-tuple, probably>0.1, OpenGL<2.4, vector, 
                         GLUT, bitarray

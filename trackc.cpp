@@ -7,6 +7,20 @@ int getopt(char c, int defval);
 int gargc;
 char **gargv;
 
+double bgim[1280][720];
+
+struct obj {
+  double vellen;
+  double sideDisp;
+  double objlen;
+  double posx;
+  double posy;
+  double rot;
+};
+
+
+
+
 int main(int argc,char *argv[])
 {
   gargc = argc;

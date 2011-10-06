@@ -12,7 +12,7 @@ import System.Cmd
 import System.Environment
 import Data.Array.IO
 import System.IO
-import Baysig.Estimate.RTS
+
 import Data.Array.Unboxed
 import Numeric.LinearAlgebra hiding (find)
 import qualified Math.Probably.PDF as PDF
