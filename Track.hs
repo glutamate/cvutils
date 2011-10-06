@@ -144,7 +144,8 @@ prevprior (Obj vlen side len x y rot)
           + PDF.gaussD rot (sdrot/sddivRot) nrot
           + PDF.gaussD len (sdlen/sddiv) nlen
           + PDF.gaussD 0 (sdSideDisp/sddiv) nside
-          + PDF.gaussD 6 1 nlen
+          + PDF.gaussD 5 0.5 nlen
+          + uniformLogPdf 3 7 nlen
 
 
 track :: StaticParams -> String -> Int -> Int -> Int -> Obj -> StateT Seed IO Obj
@@ -193,12 +194,13 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
            when (i `rem` 20 == 0) $ do 
+             lift $ updateBgIm frame mobj
+           when (i `rem` 100 == 0) $ do 
+             bgIm2 <- lift $ readIORef bgImRef
+             lift $ writeImage ("bgtrack"++show (i+frameOffset)++".png") bgIm2
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
              markedIm <- lift $ markObjsOnImage nextObjs markedIm1
              lift $ writeImage ("frame"++show (i+frameOffset)++".png") markedIm
-             lift $ updateBgIm frame mobj
-             --bgIm2 <- lift $ readIORef bgImRef
-             --lift $ writeImage ("bgtrack"++show i++".png") bgIm2
            go h nextObjs is mobj
            --return () -- $ mobj:rest
 
@@ -268,7 +270,7 @@ updateBgIm frame (Obj _ _ _ cx cy _) = do
 
 main = do
      ilInit
-     bgnm : fvid : (read -> x) : (read -> y) : (read -> rot) :_ <- getArgs
+     bgnm : fvid : (read -> x) : (read -> y) : (read -> rot) : rest <- getArgs
      --system $ "~/cvutils/extract "++fvid++" 1"
      bgIm <-readImage bgnm
      writeIORef bgImRef bgIm
@@ -278,6 +280,7 @@ main = do
      print fvid    
      vm <- readIORef visibleMat
      writeVisMat "vismat.png" vm bgIm
+     let frStart = case rest of [] -> 0; s:_ -> read s
      --frame0 <-readImage "extract.png"
      {-marked <- markObjsOnImage [Obj (x,y) 0, 
                                 Obj (x+1,y) 0, 
@@ -304,7 +307,7 @@ main = do
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
          if "%d" `isInfixOf` fvid 
             then trackMany sp fvid initObj 
-            else track sp fvid 2000 2000 0 $ initObj
+            else track sp fvid frStart 6000 0 $ initObj
      
      return () 
 
