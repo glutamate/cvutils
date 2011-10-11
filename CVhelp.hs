@@ -18,5 +18,5 @@ foreign import ccall safe "cv_help.h close_video"
   close_video :: IO ()
 
 foreign import ccall safe "cv_help.h pixel_value"
-  pixel_value :: CInt -> CInt -> CUChar -> IO CUChar 
+  pixel_value :: CInt -> CInt -> CUChar -> CUChar 
 

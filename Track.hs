@@ -28,6 +28,10 @@ import System.IO.Unsafe
 
 import CVUtils
 import Edge
+import CVhelp
+import Foreign.C.String
+import Foreign.C.Types
+import Unsafe.Coerce
 
 bgImRef :: IORef Image
 bgImRef = unsafePerformIO $ newIORef undefined
@@ -153,28 +157,32 @@ track :: StaticParams -> String -> Int -> Int -> Int -> Obj -> StateT Seed IO Ob
 track sp vidfnm startfrm nframes frameOffset obj0 = do
   let outFnm = fileroot vidfnm ++ ".pos"
   h<- lift $ openFile outFnm WriteMode 
+  lift $ withCString vidfnm open_video
   res <-  go h (replicate nparticles obj0) [startfrm..startfrm+nframes-1] obj0
   lift $ hClose h
+  lift $ close_video
   return res
    where
     go _ objs [] o = return o
     go h objs (i:is) _ = do
            bgIm <- lift $ readIORef bgImRef
            nogomat <- lift $ readIORef nogoMat
-           lift $ putStrLn $"~/cvutils/extract "++vidfnm++" "++show i 
-           lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
-           frame <- lift $ readImage "extract.png"
+--           lift $ putStrLn $"~/cvutils/extract "++vidfnm++" "++show i 
+--           lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
+--           frame <- lift $ readImage "extract.png"
+
+           lift advance
            diffObjs <- sample $ mapM (evolve 10) objs
            --lift $ print2  "pixel1Red = " (frame!(0,0,0))
            vismat <- lift $ readIORef visibleMat
-           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm frame vismat nogomat diffObjs)
+           let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm vismat nogomat diffObjs)
            let anyInvisible = any objCentreInvisible $ map fst wparticles
            let npart = if anyInvisible then 5*nparticles else nparticles
            let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/hiddenflat)) wparticles else wparticles
 
            let smws = sumWeights wparticles'
            let cummSmws = cummWeightedSamples wparticles'
-           lift $ print2 "npart=" npart          
+           lift $ print2 "fr,npart=" (i,npart)          
            --lift $ print2 "winners= " (map snd wparticles')
            --lift $ hFlush stdout
            nextObjs <- {-# SCC "resample" #-} sample $ sequence 
@@ -195,8 +203,10 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
            when (i `rem` 20 == 0) $ do 
-             lift $ updateBgIm frame mobj
+             lift $ updateBgIm mobj
            when (i `rem` 100 == 0) $ do 
+             lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
+             frame <- lift $ readImage "extract.png"
              bgIm2 <- lift $ readIORef bgImRef
              lift $ writeImage ("bgtrack"++show (i+frameOffset)++".png") bgIm2
              markedIm1 <- lift $ markEllipse sp (mobj) frame     
@@ -205,8 +215,14 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            go h nextObjs is mobj
            --return () -- $ mobj:rest
 
-particleLike :: StaticParams -> Image -> Image -> BitImage -> BitImage ->[(Obj,Obj)] -> [(Obj,R)]
-particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = map pL objprs where
+cu2w8 :: CUChar -> Word8
+cu2w8 = unsafeCoerce
+
+pixval :: Int -> Int -> CUChar -> Word8
+pixval x y c = cu2w8 $ pixel_value (fromIntegral x) (fromIntegral (719-y)) c
+
+particleLike :: StaticParams -> Image -> BitImage -> BitImage ->[(Obj,Obj)] -> [(Obj,R)]
+particleLike sp@(SP noise len ecc) bgim vismat nogomat objprs = map pL objprs where
   radiusi = 2* ceiling (len*ecc) + 2
   objs = map snd objprs
   xmin =minOn (posx) objs - radiusi 
@@ -218,25 +234,25 @@ particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = map pL objprs
   xys = [(x,y) | x <- xs, y <- ys]
 --  cvec = fromList [20,25,30]
 
-  ifInside, ifoutside, ifmixed ::UArray (Int,Int) R
+  ifInside, ifoutside :: UArray (Int,Int) R
   ifInside = listArray ((xmin,ymin),(xmax,ymax)) 
-                   [((gaussRnn noise 0.07 $ im!(y,x,0)) 
-                           + (gaussRnn noise 0.09 $ im!(y,x,1)) 
-                           + (gaussRnn noise 0.12 $ im!(y,x,2)))
+                   [(gaussRnn noise 0.07 $ pixval x y 2) 
+                           + (gaussRnn noise 0.09 $ pixval x y 1) 
+                           + (gaussRnn noise 0.12 $ pixval x y 0)
                        | x <- xs, 
                          y <- ys]
   ifoutside = listArray ((xmin,ymin),(xmax,ymax)) 
-                    [ ((gaussW8nn noise (bgim!(y,x,0)) $ im!(y,x,0))
-                           + (gaussW8nn noise (bgim!(y,x,1)) $ im!(y,x,1)) 
-                           + (gaussW8nn noise (bgim!(y,x,2)) $ im!(y,x,2)))
+                    [ (gaussW8nn noise (bgim!(y,x,0)) $ pixval x y 2)
+                           + (gaussW8nn noise (bgim!(y,x,1)) $ pixval x y 1) 
+                           + (gaussW8nn noise (bgim!(y,x,2)) $ pixval x y 0)
                        | x <- xs, 
                          y <- ys]
-  ifmixed   = listArray ((xmin,ymin),(xmax,ymax)) 
+{-  ifmixed   = listArray ((xmin,ymin),(xmax,ymax)) 
                     [ ((gaussW8nn noise (bgim!(y,x,0) `div` 2) $ im!(y,x,0))
                            + (gaussW8nn noise (bgim!(y,x,1) `div` 2) $ im!(y,x,1)) 
                            + (gaussW8nn noise (bgim!(y,x,2) `div` 2) $ im!(y,x,2)))
                        | x <- xs, 
-                         y <- ys]
+                         y <- ys] -}
  
   pL (old,o@(Obj  _ _ len cx cy rot)) = 
     let f1x = cx+(len*ecc)*cos rot
@@ -256,23 +272,42 @@ particleLike sp@(SP noise len ecc) bgim im vismat nogomat objprs = map pL objprs
                    --y <- ys]))
 
 
-updateBgIm frame (Obj _ _ _ cx cy _) = do
+updateBgIm (Obj _ _ _ cx cy _) = do
     im <- readIORef bgImRef
     mutIm <- thaw im
     ((loy,lox,_),(hiy,hix,_)) <- getBounds mutIm
     forM_ [(y,x,c) | x<- [lox..hix], 
                      y<- [loy..hiy],
                      c<- [0..2], 
-                     dist cx cy x y > 30] $ \ix-> do
+                     dist cx cy x y > 30] $ \ix@(y,x,c)-> do
       now <- readArray mutIm ix
-      writeArray mutIm ix $ (now `div` 2)  + ((frame!ix) `div` 2)
+      writeArray mutIm ix $ (now `div` 2)  + (pixval x y (rgb2bgr c) `div` 2)
     newbg <- freeze (mutIm::MImage)
     writeIORef bgImRef newbg
+
+rgb2bgr 2 = 0
+rgb2bgr 0 = 2
+rgb2bgr 1 = 1
+
+
+
+{-testCV fvid = do
+     system $ "~/cvutils/extract "++fvid++" 0"
+     frame <- readImage "extract.png"
+     print2 "via png " $ frame!(100,100,0)     
+     withCString fvid open_video  
+     advance
+     print2 "via c " $ pixel_value 100 (719-100) 2
+     print2 "via c " $ pixval 100 100 2
+     close_video -}
+     --error "foo" 
 
 main = do
      ilInit
      bgnm : fvid : (read -> x) : (read -> y) : (read -> rot) : rest <- getArgs
-     --system $ "~/cvutils/extract "++fvid++" 1"
+     --testCV fvid
+
+
      bgIm <-readImage bgnm
      writeIORef bgImRef bgIm
 --     marked <- markBg bgIm
@@ -281,7 +316,11 @@ main = do
      print fvid    
      vm <- readIORef visibleMat
      writeVisMat "vismat.png" vm bgIm
-     let frStart = case rest of [] -> 0; s:_ -> read s
+     let (frStart,nfr) = case rest of 
+            [] -> (0,6000)
+            s:[] -> (read s, 6000)
+            s1:s2:_ -> (read s1,read s2)
+
      --frame0 <-readImage "extract.png"
      {-marked <- markObjsOnImage [Obj (x,y) 0, 
                                 Obj (x+1,y) 0, 
@@ -308,7 +347,7 @@ main = do
 --         track (v@> 2) (v @> 3) bgIm fvid 3 (v@>0,v@>1)
          if "%d" `isInfixOf` fvid 
             then trackMany sp fvid initObj 
-            else track sp fvid frStart 6000 0 $ initObj
+            else track sp fvid frStart nfr 0 $ initObj
      
      return () 
 
