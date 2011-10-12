@@ -63,12 +63,23 @@ hiddenflat = 1
 
 nparticles = 1000
 
+gauss2i :: R -> R-> R-> R-> Sampler (R,R)
+gauss2i m1 sd1 m2 sd2 = do
+   u1 <- unitSample
+   u2 <- unitSample
+   let l = sqrt(-2*log(u1))
+       th = 2*pi*u2
+--   return (sqrt(-2*log(u1))*cos(2*pi*u2)*sd1+m1,
+--           sqrt(-2*log(u1))*sin(2*pi*u2)*sd2+m2)
+   return (l*cos(th)*sd1+m1,
+           l*sin(th)*sd2+m2)
+
 evolve :: Int -> Obj -> Sampler (Obj,Obj)
 evolve retries o@(Obj vlen side len x y rot) = do
-        nvlen <- gaussD vlen sdv
-        nside <- gaussD 0 sdSideDisp
-        nrot <- gaussD rot sdrot
-        nlen <- gaussD len sdlen
+        (nvlen, nside) <- gauss2i vlen sdv 0 sdSideDisp
+--        nside <- gaussD 0 sdSideDisp
+        (nrot, nlen) <- gauss2i rot sdrot len sdlen
+--        nlen <- gaussD len sdlen
         let no = Obj nvlen nside nlen
                                  (x+nvlen*cos nrot+nside*cos(nrot-pi/2)) 
                                  (y+nvlen*sin nrot+nside*sin(nrot-pi/2)) nrot
@@ -176,7 +187,7 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            --lift $ print2  "pixel1Red = " (frame!(0,0,0))
            vismat <- lift $ readIORef visibleMat
            let wparticles = {-# SCC "wpart" #-} (dropLosers $ particleLike sp bgIm vismat nogomat diffObjs)
-           let anyInvisible = any objCentreInvisible $ map fst wparticles
+           let anyInvisible = {-# SCC "anyvis" #-}any objCentreInvisible $ map fst wparticles
            let npart = if anyInvisible then 5*nparticles else nparticles
            let wparticles' = if anyInvisible then map (\(x,w) -> (x,w/hiddenflat)) wparticles else wparticles
 
@@ -191,8 +202,8 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
                                    return . fst . fromJust $ find ((>=u*smws) . snd) cummSmws
            --lift $ print $ map snd $ take 10 $ reverse $ cummSmws
 
-           let mobj 
-                 = runStat (pure Obj <*> before meanF vellen
+           let mobj = {-# SCC "mobj" #-} 
+                   runStat (pure Obj <*> before meanF vellen
                                      <*> before meanF sideDisp
                                      <*> before meanF objlen
                                      <*> before meanF posx
@@ -202,16 +213,16 @@ track sp vidfnm startfrm nframes frameOffset obj0 = do
            --lift $ putStrLn $ show (i,mobj, snd $ last $  wparticles)
            lift $ hPutStrLn h $ show (i,mobj, snd $ last $  wparticles)
            lift $ hFlush h
-           when (i `rem` 20 == 0) $ do 
+           when (i `rem` 50 == 0) $ {-# SCC "upbg" #-} do 
              lift $ updateBgIm mobj
-           when (i `rem` 100 == 0) $ do 
-             lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
-             frame <- lift $ readImage "extract.png"
-             bgIm2 <- lift $ readIORef bgImRef
-             lift $ writeImage ("bgtrack"++show (i+frameOffset)++".png") bgIm2
-             markedIm1 <- lift $ markEllipse sp (mobj) frame     
-             markedIm <- lift $ markObjsOnImage nextObjs markedIm1
-             lift $ writeImage ("frame"++show (i+frameOffset)++".png") markedIm
+             when (i `rem` 100 == 0) $ {-# SCC "outframe" #-} do 
+               lift $ system $"~/cvutils/extract "++vidfnm++" "++show i 
+               frame <- lift $ readImage "extract.png"
+               bgIm2 <- lift $ readIORef bgImRef
+               lift $ writeImage ("bgtrack"++show (i+frameOffset)++".png") bgIm2
+               markedIm1 <- lift $ markEllipse sp (mobj) frame     
+               markedIm <- lift $ markObjsOnImage nextObjs markedIm1
+               lift $ writeImage ("frame"++show (i+frameOffset)++".png") markedIm
            go h nextObjs is mobj
            --return () -- $ mobj:rest
 
@@ -225,49 +236,42 @@ particleLike :: StaticParams -> Image -> BitImage -> BitImage ->[(Obj,Obj)] -> [
 particleLike sp@(SP noise len ecc) bgim vismat nogomat objprs = map pL objprs where
   radiusi = 2* ceiling (len*ecc) + 2
   objs = map snd objprs
-  xmin =minOn (posx) objs - radiusi 
+  xmin = minOn (posx) objs - radiusi 
   xmax = maxOn (posx) objs+radiusi
   ymin = minOn (posy) objs-radiusi
   ymax = maxOn posy objs+radiusi
-  xs = [xmin.. xmax] -- calc region of interest from all objs
-  ys = [ymin..ymax]
-  xys = [(x,y) | x <- xs, y <- ys]
+  xys = [(x,y) | x <- [xmin.. xmax], y <- [ymin..ymax]]
 --  cvec = fromList [20,25,30]
-
+  ifvis x y n = if readBitImage vismat x y then n else 0
   ifInside, ifoutside :: UArray (Int,Int) R
-  ifInside = listArray ((xmin,ymin),(xmax,ymax)) 
-                   [(gaussRnn noise 0.07 $ pixval x y 2) 
+  ifInside = {-# SCC "ifinside" #-} listArray ((xmin,ymin),(xmax,ymax)) 
+                   [ifvis x y $ (gaussRnn noise 0.07 $ pixval x y 2) 
                            + (gaussRnn noise 0.09 $ pixval x y 1) 
                            + (gaussRnn noise 0.12 $ pixval x y 0)
-                       | x <- xs, 
-                         y <- ys]
-  ifoutside = listArray ((xmin,ymin),(xmax,ymax)) 
-                    [ (gaussW8nn noise (bgim!(y,x,0)) $ pixval x y 2)
+                       | (x,y) <- xys]
+  ifoutside = {-# SCC "ifoutside" #-}listArray ((xmin,ymin),(xmax,ymax)) 
+                    [ifvis x y $ (gaussW8nn noise (bgim!(y,x,0)) $ pixval x y 2)
                            + (gaussW8nn noise (bgim!(y,x,1)) $ pixval x y 1) 
                            + (gaussW8nn noise (bgim!(y,x,2)) $ pixval x y 0)
-                       | x <- xs, 
-                         y <- ys]
-{-  ifmixed   = listArray ((xmin,ymin),(xmax,ymax)) 
-                    [ ((gaussW8nn noise (bgim!(y,x,0) `div` 2) $ im!(y,x,0))
-                           + (gaussW8nn noise (bgim!(y,x,1) `div` 2) $ im!(y,x,1)) 
-                           + (gaussW8nn noise (bgim!(y,x,2) `div` 2) $ im!(y,x,2)))
-                       | x <- xs, 
-                         y <- ys] -}
+                       | (x,y) <- xys]
  
-  pL (old,o@(Obj  _ _ len cx cy rot)) = 
-    let f1x = cx+(len*ecc)*cos rot
-        f1y = cy+(len*ecc)*sin rot
-        f2x = cx-(len*ecc)*cos rot
-        f2y = cy-(len*ecc)*sin rot
-        sqrlen = 4 * len* len
-        f (x, y)  
-          | not $ readBitImage vismat x y  = 0
-          | dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
-               =  ifInside!(x,y)
-          | otherwise =  ifoutside!(x,y)
-    in if readBitImage nogomat (round $ posx o) (round $ posy o) 
+  pL (old,o@(Obj  _ _ len cx cy rot)) = {-# SCC "pL" #-}
+    let lenecc=len*ecc
+        srot = lenecc*sin rot
+        crot = lenecc*cos rot
+        f1x = cx+crot
+        f1y = cy+srot
+        f2x = cx-crot
+        f2y = cy-srot
+--        f :: (R,R) -> R
+        f xy@(x, y)  
+--          | not $ readBitImage vismat x y  = 0
+          = {-# SCC "f" #-} if dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
+                               then ifInside!xy
+                               else ifoutside!xy
+    in if readBitImage nogomat (round $ cx) (round $ cy) 
           then (o,-1e100) 
-          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f (xy)  | xy <- xys]))
+          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f xy  | xy <- xys]))
                    --x <- xs, 
                    --y <- ys]))
 
@@ -285,6 +289,7 @@ updateBgIm (Obj _ _ _ cx cy _) = do
     newbg <- freeze (mutIm::MImage)
     writeIORef bgImRef newbg
 
+rgb2bgr :: Int -> CUChar
 rgb2bgr 2 = 0
 rgb2bgr 0 = 2
 rgb2bgr 1 = 1

@@ -12,7 +12,6 @@ Library
    Exposed-modules:     Edge, CVUtils, CVhelp
    c-sources:           cv_help.c
    include-dirs:        /usr/include/opencv
---   ghc-options:         -lml -lcvaux -lhighgui -lcv -lcxcore
    extra-libraries:     ml, cvaux, highgui, cv, cxcore
 
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
@@ -25,7 +24,6 @@ Executable mix
 --   Hs-source-dirs:   prog
    Main-Is:          Mix.hs
    ghc-options:      -O2 -threaded
---   other-modules:    EvalM
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
                         gnewplot, hmatrix, storablevector, Codec-Image-DevIL, 
@@ -34,10 +32,10 @@ Executable mix
 Executable track
 --   Hs-source-dirs:   prog
    Main-Is:          Track.hs
-   ghc-options:      -O3 -threaded -rtsopts
---   other-modules:    EvalM
+   ghc-options:      -O2 -threaded -rtsopts -fexcess-precision 
    ghc-prof-options:    -auto-all
    c-sources:           cv_help.c
+   cc-options:		-O2
    include-dirs:        /usr/include/opencv
 --   ghc-options:         -lml -lcvaux -lhighgui -lcv -lcxcore
    extra-libraries:     ml, cvaux, highgui, cv, cxcore
@@ -52,8 +50,7 @@ Executable track
 Executable locatewl
 --   Hs-source-dirs:   prog
    Main-Is:          Locate.hs
-   ghc-options:      -O3 -threaded -rtsopts
---   other-modules:    EvalM
+   ghc-options:      -O3 -threaded -rtsopts 
    ghc-prof-options:    -auto-all
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,

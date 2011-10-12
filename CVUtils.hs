@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, MagicHash #-}
+{-# LANGUAGE ViewPatterns, MagicHash, BangPatterns #-}
 
 module CVUtils where
 
@@ -92,16 +92,10 @@ data StaticParams = SP {noise :: !R,
 
 
 dist :: R -> R -> Int ->Int -> R 
-dist  cx cy   x y  = let dx = cx-(realToFrac x+0.5)
-                         dy = cy-(realToFrac y+0.5)
-                      in sqrt(dx*dx + dy*dy)
-
-dist' :: R -> R -> Int ->Int -> R 
-dist'  cx cy   x y  = let dx = cx-(realToFrac x+0.5)
-                          dy = cy-(realToFrac y+0.5)
-                      in dx*dx + dy*dy
-
-
+dist  !cx !cy !x !y  = let !dx = cx-(unround x+0.5)
+                           !dy = cy-(unround y+0.5)
+                       in sqrt(dx*dx + dy*dy)
+  
 gaussW8 :: R -> Word8 -> Word8 -> R
 gaussW8 tau muw8 = lpdf . word8ToR  
    where lpdf x = log (sqrt (tau/2.0*pi)) + (0.0-((x-mu)*(x-mu)*tau))
@@ -127,6 +121,11 @@ word8ToR :: Word8 -> R
 word8ToR (W8# whash) = (/256) $ D# $ int2Double# $ word2Int# whash
 realToW8 :: R -> Word8
 realToW8 =  round . (*256) 
+
+
+unround :: Int -> R
+--word8ToR (W8# whash) = (/256) $ F# $ int2Float# $ word2Int# whash
+unround (I# whash) = D# $ int2Double# whash
 
 markObjsOnImage :: [Obj] -> Image -> IO (Image)
 markObjsOnImage objs im = do
