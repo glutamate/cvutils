@@ -91,10 +91,18 @@ data StaticParams = SP {noise :: !R,
                         eccentric :: !R } deriving Show
 
 
+
 dist :: R -> R -> Int ->Int -> R 
 dist  !cx !cy !x !y  = let !dx = cx-(unround x+0.5)
                            !dy = cy-(unround y+0.5)
                        in sqrt(dx*dx + dy*dy)
+
+dist' :: R -> R -> Int ->Int -> R 
+dist' (D# cx) (D# cy) (I# x) (I# y)  
+       = let !dx = cx -## (int2Double# x+##half)
+             !dy = cy -## (int2Double# y+##half)
+             !(D# half) = 0.5
+         in  D# (sqrtDouble# (dx*##dx +## dy*##dy))
   
 gaussW8 :: R -> Word8 -> Word8 -> R
 gaussW8 tau muw8 = lpdf . word8ToR  

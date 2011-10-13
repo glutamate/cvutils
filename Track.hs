@@ -15,6 +15,10 @@ import Data.Array.IO
 import System.IO
 
 import Data.Array.Unboxed
+import Data.Array.Base
+import qualified Data.Vector.Unboxed as V
+import qualified Data.StorableVector as SV
+import qualified Data.StorableVector.Base as SVB
 import Numeric.LinearAlgebra hiding (find)
 import qualified Math.Probably.PDF as PDF
 import Data.List
@@ -241,16 +245,17 @@ particleLike sp@(SP noise len ecc) bgim vismat nogomat objprs = map pL objprs wh
   ymin = minOn (posy) objs-radiusi
   ymax = maxOn posy objs+radiusi
   xys = [(x,y) | x <- [xmin.. xmax], y <- [ymin..ymax]]
+  yrng = (ymax-ymin+1)
 --  cvec = fromList [20,25,30]
   ifvis x y n = if readBitImage vismat x y then n else 0
   ifInside, ifoutside :: UArray (Int,Int) R
   ifInside = {-# SCC "ifinside" #-} listArray ((xmin,ymin),(xmax,ymax)) 
-                   [ifvis x y $ (gaussRnn noise 0.07 $ pixval x y 2) 
+               [ifvis x y $ (gaussRnn noise 0.07 $ pixval x y 2) 
                            + (gaussRnn noise 0.09 $ pixval x y 1) 
                            + (gaussRnn noise 0.12 $ pixval x y 0)
                        | (x,y) <- xys]
-  ifoutside = {-# SCC "ifoutside" #-}listArray ((xmin,ymin),(xmax,ymax)) 
-                    [ifvis x y $ (gaussW8nn noise (bgim!(y,x,0)) $ pixval x y 2)
+  ifoutside = {-# SCC "ifoutside" #-} listArray ((xmin,ymin),(xmax,ymax)) 
+              [ifvis x y $ (gaussW8nn noise (bgim!(y,x,0)) $ pixval x y 2)
                            + (gaussW8nn noise (bgim!(y,x,1)) $ pixval x y 1) 
                            + (gaussW8nn noise (bgim!(y,x,2)) $ pixval x y 0)
                        | (x,y) <- xys]
@@ -264,14 +269,19 @@ particleLike sp@(SP noise len ecc) bgim vismat nogomat objprs = map pL objprs wh
         f2x = cx-crot
         f2y = cy-srot
 --        f :: (R,R) -> R
-        f xy@(x, y)  
+        f sm xy@(x, y)  
 --          | not $ readBitImage vismat x y  = 0
           = {-# SCC "f" #-} if dist  f1x f1y   x  y  + dist  f2x f2y   x  y  < 2 * len 
-                               then ifInside!xy
-                               else ifoutside!xy
+                               then sm+ ifInside!xy
+                               else sm+ifoutside!xy
+--                               then sm + (V.unsafeIndex) ifInside  ((x-xmin)*yrng+(y-ymin))
+ --                              else sm + (V.unsafeIndex) ifoutside ((x-xmin)*yrng+(y-ymin))
+--                               then (SVB.unsafeIndex) ifInside  
+--                               else (SVB.unsafeIndex) ifoutside ((x-xmin)*yrng+(y-ymin))
+
     in if readBitImage nogomat (round $ cx) (round $ cy) 
           then (o,-1e100) 
-          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * sum [ f xy  | xy <- xys]))
+          else (o, prevprior old o + {-# SCC "fsum" #-} (noise * foldl' f 0 xys))
                    --x <- xs, 
                    --y <- ys]))
 
