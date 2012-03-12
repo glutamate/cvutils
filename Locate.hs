@@ -88,6 +88,6 @@ main = do
      print [frame0!(round y,round x+1,c) | c <- [0..2]]
      runRIO $ do
          iniampar <- sample $ initialAdaMet 300 1.5e-4 posterior initialsV
-         AMPar v _ _ _ _ _ <- runAndDiscard 50000 (show . ampPar) iniampar $ adaMet False posterior
+         AMPar v _ _ _ _ _ _ <- runAndDiscard 50000 (show . ampPar) iniampar $ adaMet False posterior
          lift $ print initialsV
          lift $ print v

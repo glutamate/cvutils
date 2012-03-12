@@ -1,6 +1,6 @@
-#include <cv.h>
+#include <opencv2/core/core_c.h>
 #include <stdio.h>
-#include <highgui.h>
+#include <opencv2/highgui/highgui_c.h>
 #include "cv_help.h"
 // globals
 

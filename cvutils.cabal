@@ -12,7 +12,7 @@ Library
    Exposed-modules:     Edge, CVUtils, CVhelp
    c-sources:           cv_help.c
    include-dirs:        /usr/include/opencv
-   extra-libraries:     ml, cvaux, highgui, cv, cxcore
+   extra-libraries:     opencv_ml, opencv_highgui, opencv_core
 
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
@@ -37,8 +37,8 @@ Executable track
    c-sources:           cv_help.c
    cc-options:		-O2
    include-dirs:        /usr/include/opencv
---   ghc-options:         -lml -lcvaux -lhighgui -lcv -lcxcore
-   extra-libraries:     ml, cvaux, highgui, cv, cxcore
+--   ghc-options:         -lml -lcvaux -lhighgui -lcv -lcxcor
+   extra-libraries:     opencv_ml, opencv_highgui, opencv_core
 
    Build-depends:       base>=4, syb, mtl>2, parsec>=3, 
                         random, unix, directory, process,containers,bytestring,binary,
