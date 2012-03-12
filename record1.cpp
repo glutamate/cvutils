@@ -1,6 +1,9 @@
-#include <cv.h>
+//#include <cv.h>
+#include "opencv2/core/core.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/highgui/highgui.hpp"
 #include <stdio.h>
-#include <highgui.h>
 #include <sys/time.h>
 
 int getopt(char c, int defval);
@@ -24,11 +27,11 @@ int main(int argc,char *argv[])
 
   cvNamedWindow("Video",0); // create window
   color_img = cvQueryFrame(cv_cap); // get frame
-  int frameH    = getopt('h',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT));
+  int frameH    = getopt('h', 720 ); // (int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT));
   cvSetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_HEIGHT, (double) frameH);
-  int frameW    = getopt('w',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH));
+  int frameW    = getopt('w',1280 );//(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH));
   cvSetCaptureProperty(cv_cap, CV_CAP_PROP_FRAME_WIDTH, (double) frameW);
-  int fps       = getopt('r',(int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FPS));
+  int fps       = getopt('r',10); // (int) cvGetCaptureProperty(cv_cap, CV_CAP_PROP_FPS));
   cvSetCaptureProperty(cv_cap, CV_CAP_PROP_FPS, (double) fps);
   //  int numFrames = (int) cvGetCaptureProperty(capture,  CV_CAP_PROP_FRAME_COUNT);
 
@@ -53,9 +56,11 @@ int main(int argc,char *argv[])
     tsfile = fopen(tsfilenm,"w+");
     vid_write= cvCreateVideoWriter(vidnm,
 				   //CV_FOURCC('M','J','P','G'),
-				   CV_FOURCC('D','I','V','X'),
+				   CV_FOURCC('M','P','4','2'),
+				   //CV_FOURCC('H','2','6','4'),
 				   //CV_FOURCC('F','L','V','1'),
 				   fps,cvSize(frameW,frameH),1);
+    if(vid_write==NULL) exit(0);
     
     for(frcount = 0;frcount < nframes;frcount++) {
       color_img = cvQueryFrame(cv_cap); // get frame
